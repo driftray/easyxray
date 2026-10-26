@@ -133,6 +133,13 @@ if command -v ss >/dev/null 2>&1; then
     fi
 fi
 
+# 纯 IPv6 VPS：GitHub 不支持 IPv6，无法下载 easyxray 和 Xray
+if [[ -n "$(ip -4 route show default 2>/dev/null)" ]]; then
+    pass "IPv4 网络"
+else
+    fail "没有 IPv4 网络：暂不支持纯 IPv6 VPS（GitHub 不支持 IPv6，无法下载 easyxray 和 Xray）"
+fi
+
 free_mb=$(df -Pm / | awk 'NR==2 {print $4}')
 if [[ "${free_mb:-0}" -ge 300 ]]; then
     pass "磁盘剩余 ${free_mb} MB"

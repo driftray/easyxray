@@ -62,7 +62,9 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 
 ## 安装前准备
 
-1. **一台 VPS**：Debian 12+ 或 Ubuntu 22.04+，x86_64 或 arm64，可以使用 root。
+1. **一台 VPS**：Debian 12+ 或 Ubuntu 22.04+，x86_64 或 arm64，可以使用 root，有独立的公网 IPv4。暂不支持：
+   - **NAT VPS**（多台共用一个公网 IPv4，只分配部分转发端口）：申请证书需要 80 端口，Reality-Vision 需要 443 端口。
+   - **纯 IPv6 VPS**：GitHub 不支持 IPv6，无法下载 easyxray 和 Xray。
 2. **一个域名**：A 记录解析到这台 VPS 的公网 IP。
 3. **在云服务商的安全组中放行端口**：
 
@@ -108,6 +110,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
   ✓ 没有发现其他代理脚本或面板
   ✓ TCP 443 空闲
   ✓ TCP 80 可用
+  ✓ IPv4 网络
   ✓ 磁盘剩余 45113 MB
   ✓ 下载工具 curl
   ✓ 可以访问 github.com
@@ -126,6 +129,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 | 其他代理 | 没有 v2ray-agent、x-ui / 3x-ui，没有正在运行的 xray、v2ray、sing-box、hysteria-server 服务 |
 | 端口 | TCP 443 空闲；TCP 80 空闲或由 Nginx 使用 |
 | 磁盘 | 至少 300 MB 剩余空间 |
+| IPv4 | 有 IPv4 默认路由（纯 IPv6 VPS 不支持） |
 | 网络 | 能访问 github.com；缺少 curl 或 ca-certificates 时自动安装 |
 
 安装过程依次完成：安装软件包 → 下载并校验 Xray → 申请证书 → 开启 BBR → 配置日志轮转 → 生成配置并启动服务。完成后显示各协议的端口、需要在安全组放行的端口，以及第一个用户的订阅地址和二维码。
