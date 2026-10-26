@@ -16,8 +16,6 @@
 
 easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命令完成证书申请、Xray 安装、伪装站点、防火墙和 BBR，之后通过中文菜单或命令管理用户、协议、订阅和 WARP 分流。
 
-服务器的全部设置都记录在一个状态文件中，Xray 配置、Nginx 配置和订阅文件由它统一生成。每次修改先校验，通过后才生效；新配置启动失败时自动恢复到上一份配置。
-
 ## 目录
 
 - [特点](#特点)
@@ -58,7 +56,7 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 | 4 | VLESS + Reality + XHTTP | TCP | 随机 | | 备用 |
 | 5 | VLESS + TLS + Vision | TCP | 随机 | | 备用 |
 
-随机端口默认在 `8000-8100` 范围内选择空闲端口，选定后固定不变。Reality 的回落目标是本机 Nginx 上的自有域名站点。
+随机端口默认在 `8000-8100` 范围内选择空闲端口，选定后固定不变。
 
 ## 安装前准备
 
@@ -87,7 +85,7 @@ sudo -i
 wget -N https://raw.githubusercontent.com/driftray/easyxray/main/install.sh && bash install.sh
 ```
 
-已经是 root 时不需要 `sudo -i`（部分精简系统没有安装 sudo）。没有 wget 时用 curl：
+已经是 root 时不需要 `sudo -i`。没有 wget 时用 curl：
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh && bash install.sh
@@ -95,11 +93,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 
 以后每次都可以用同一条命令：没有安装时进行安装，已经安装时进入管理菜单，有新版本时会提示。安装完成后也可以直接使用 `easyxray` 或快捷命令 `ezx`，下文以 `ezx` 为例。
 
-### 安装脚本做什么
-
-1. **检查环境**，全部通过才继续；有问题时列出所有问题后停止，不做任何修改。
-2. **下载程序包**：从 GitHub Release 下载最新版本的 `easyxray.tar.gz`，校验 SHA256 后解压到 `/opt/easyxray`。
-3. **开始安装**：没有参数时进入安装菜单（交互式），带参数时直接安装（非交互式）。
+安装脚本先检查环境，有问题时列出后停止；全部通过后从 GitHub Release 下载程序包，校验 SHA256 后开始安装：
 
 ```
 检查环境
@@ -119,18 +113,6 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
   ✓ SHA256 校验通过
   ✓ 已解压到 /opt/easyxray（0.2.0）
 ```
-
-| 检查项 | 要求 |
-|---|---|
-| 权限 | root |
-| 系统 | Debian 12+ 或 Ubuntu 22.04+ |
-| CPU 架构 | x86_64 或 arm64 |
-| systemd | 必须使用 systemd（OpenVZ、LXC 等容器可能不满足） |
-| 其他代理 | 没有 v2ray-agent、x-ui / 3x-ui，没有正在运行的 xray、v2ray、sing-box、hysteria-server 服务 |
-| 端口 | TCP 443 空闲；TCP 80 空闲或由 Nginx 使用。其他协议的端口在安装时随机选择空闲端口，不在这里检查 |
-| 磁盘 | 至少 300 MB 剩余空间 |
-| IPv4 | 有 IPv4 默认路由（纯 IPv6 VPS 不支持） |
-| 网络 | 能访问 github.com；缺少 curl 或 ca-certificates 时自动安装 |
 
 安装过程依次完成：安装软件包 → 下载并校验 Xray → 申请证书 → 开启 BBR → 配置日志轮转 → 生成配置并启动服务。完成后显示各协议的端口、需要在安全组放行的端口，以及第一个用户的订阅地址和二维码。
 
@@ -164,7 +146,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 
 ### 非交互式安装
 
-在 `install.sh` 后面加上安装参数，全程不提问，适合自动化部署（例如云服务器的 cloud-init 或批量部署脚本）：
+在 `install.sh` 后面加上安装参数，全程不提问，适合自动化部署：
 
 ```bash
 # 推荐安装：Reality-Vision + Hysteria2
@@ -186,10 +168,7 @@ curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh |
 | `--email 邮箱` | 第一个用户的邮箱，不填时自动生成 `随机前缀@xray.fake` |
 | `--version 版本` | 安装指定版本，例如 `--version v0.2.0`，不填时安装最新版本 |
 
-- 没有终端（例如通过管道运行）又没有给参数时，安装脚本会直接报错退出，不会卡在等待输入。
-- 服务器上有[保留配置卸载](#卸载)留下的配置时，不需要参数，会沿用原来的域名、用户、端口和密钥。
-- 已经安装时带参数运行，只提示已经安装，不会重复安装，可以放心在部署脚本里重复执行。
-- 程序已经下载到 `/opt/easyxray` 时，也可以直接运行 `/opt/easyxray/easyxray install --domain box.example.com`，参数相同。
+已经安装时带参数运行只会提示已安装，不会重复安装。
 
 ### 手动安装
 
@@ -204,8 +183,6 @@ curl -fLO https://github.com/driftray/easyxray/releases/latest/download/easyxray
 sha256sum -c easyxray.tar.gz.sha256 && tar -xzf easyxray.tar.gz && rm -f easyxray.tar.gz*
 /opt/easyxray/easyxray
 ```
-
-`sha256sum -c` 显示 `easyxray.tar.gz: OK` 才会解压。
 
 ## 客户端设置
 
@@ -254,7 +231,7 @@ sudo ezx sub
 ╰────────────────────────────────────────────────────────
 ```
 
-状态面板显示域名、Xray 版本和运行状态、用户数、WARP 状态，以及各协议的开关和端口。在所有子菜单中，输入 0 或直接回车返回上一级。
+在所有子菜单中，输入 0 或直接回车返回上一级。
 
 ### 1. 查看订阅
 
@@ -438,7 +415,6 @@ ezx uninstall --purge                 # 完全卸载
 
 - **状态文件** `/etc/easyxray/state.json` 是唯一的数据来源，记录域名、用户、各协议的端口和密钥、分流规则和 WARP 设置。
 - **每次修改都整体重新生成** Xray 配置、Nginx 配置和订阅文件，相同的状态始终生成相同的配置。
-- **健康检查**确认 Xray 正在运行，并且每个已开启协议的端口都在监听。
 - 请通过菜单或命令修改设置，不要手动编辑 `/etc/easyxray/xray/` 下的文件，否则下次修改时会被覆盖。
 
 ## 文件位置
@@ -472,14 +448,6 @@ ezx uninstall --purge                 # 完全卸载
 
 运行 `sudo ezx doctor` 确认 BBR 已开启。线路丢包较多时，可以尝试 Hysteria2，并在客户端中填写带宽。
 
-**提示需要 root**
-
-使用 `sudo ezx`，或先执行 `sudo -i` 切换到 root。
-
-**改错了设置**
-
-运行 `sudo ezx rollback`，或在菜单中选择「8 恢复上一份配置」。
-
 ## 更新
 
 ```bash
@@ -494,22 +462,13 @@ sudo ezx update
 
 状态文件、用户、端口和密钥都不受影响，客户端不需要重新导入订阅。
 
-v0.1.0 是用 `git clone` 安装的，还没有 `update` 命令，需要先手动更新一次：
-
-```bash
-sudo -i
-cd /opt/easyxray && git pull && ./easyxray apply
-```
-
-之后就可以使用 `ezx update`。
-
 ## 卸载
 
 ```bash
 sudo ezx uninstall
 ```
 
-运行后选择卸载方式，也可以直接用 `--keep-config` 或 `--purge` 指定。两种方式都会先确认。
+运行后选择卸载方式，也可以直接用 `--keep-config` 或 `--purge` 指定。
 
 **保留配置卸载**（`--keep-config`）
 
@@ -519,7 +478,7 @@ sudo ezx uninstall
 - 程序目录 `/opt/easyxray` 和 `ezx` 命令
 - Let's Encrypt 证书
 
-之后运行 `sudo ezx`，选择「1 恢复安装」，或运行 `sudo ezx install`，不需要再填域名。原来的用户、端口、密钥和开启的协议保持不变，客户端不需要重新导入订阅。适合排查问题、暂时停用，或重装系统软件之后恢复。
+之后运行 `sudo ezx`，选择「1 恢复安装」，或运行 `sudo ezx install`，不需要再填域名。原来的用户、端口、密钥和开启的协议保持不变，客户端不需要重新导入订阅。
 
 **完全卸载**（`--purge`）
 
@@ -536,7 +495,7 @@ sudo ezx uninstall
 
 ## 许可证
 
-easyxray 采用 [GPL-3.0](LICENSE) 许可证。你可以自由使用、修改和分发；分发修改后的版本时，需要以同样的 GPL-3.0 许可证公开源代码。
+[GPL-3.0](LICENSE)
 
 ## 致谢
 
