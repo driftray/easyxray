@@ -1,0 +1,645 @@
+#!/usr/bin/env bash
+# easyxray：用一个状态文件管理 Xray 服务器。不带参数运行进入菜单，easyxray help 查看命令
+# SPDX-License-Identifier: GPL-3.0
+set -o pipefail
+
+EZ_HOME=${EZ_HOME:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)}
+for f in common port protocol render users routing warp nginx system apply doctor ui; do
+    # shellcheck source=/dev/null
+    source "${EZ_HOME}/lib/${f}.sh"
+done
+load_protocols
+
+usage() {
+    cat <<EOF
+easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
+用法：easyxray [命令]（不带命令进入菜单）
+
+  install --domain 域名 [--full] [--protocols a,b] [--port-range 8000-8100] [--email 邮箱]
+                                  首次安装。默认推荐安装（Reality-Vision + Hysteria2），--full 安装全部 5 个协议
+  protocol list | enable 名称 [--port 端口] | disable 名称
+  user list | add [邮箱] | del 邮箱  不填邮箱时生成 随机前缀@xray.fake
+  sub [邮箱]                      显示订阅地址和分享链接
+  route list | add 出口 规则 | del 出口 [规则] | quic block|allow
+                                  出口：direct、block、warp-ipv4；规则用逗号分隔，例如 anthropic,example.com,geoip:cn
+                                  不带前缀的名称会去 geosite 列表里查（anthropic = geosite:anthropic）
+  warp setup | remove             注册或删除 WARP 出口
+  xray version | use [版本]       查看或切换 Xray 版本（不填为推荐版本）
+  log debug [分钟] | normal | show 临时打开调试日志（默认 30 分钟后自动恢复）
+  apply | rollback | doctor       重新生成配置 / 恢复上一份配置 / 诊断
+  uninstall                       卸载
+
+协议名称：reality-vision hysteria2 xhttp-tls reality-xhttp vless-tls-vision
+EOF
+}
+
+need_installed() { state_exists || die "还没有安装，请先运行：easyxray install --domain 你的域名"; }
+
+valid_protocol() {
+    local p
+    for p in "${EZ_PROTOCOLS[@]}"; do [[ "${p}" == "$1" ]] && return 0; done
+    die "没有这个协议：$1（可选：${EZ_PROTOCOLS[*]}）"
+}
+
+# ---------- 安装 ----------
+
+protocol_enable_state() {
+    local p=$1 port=${2:-}
+    [[ -n "${port}" ]] && proto_set "${p}" '{port: ($port|tonumber)}' --arg port "${port}"
+    proto_call "${p}" init
+    proto_set "${p}" '{enabled: true}'
+}
+
+link_commands() {
+    no_system && return 0
+    local name
+    ln -sf "${EZ_HOME}/easyxray" /usr/local/bin/easyxray
+    name=ezx
+    if [[ -L "/usr/local/bin/${name}" && "$(readlink "/usr/local/bin/${name}")" == "${EZ_HOME}/easyxray" ]]; then
+        return 0
+    fi
+    if command -v "${name}" >/dev/null 2>&1; then
+        warn "系统里已经有 ${name} 命令（$(command -v "${name}")），不创建快捷命令，请用 easyxray"
+    else
+        ln -s "${EZ_HOME}/easyxray" "/usr/local/bin/${name}"
+    fi
+}
+
+cmd_install() {
+    local domain='' full='' protocols='' range='' email='' p
+    while (($#)); do
+        case "$1" in
+        --domain) domain=$2; shift ;;
+        --full) full=1 ;;
+        --protocols) protocols=$2; shift ;;
+        --port-range) range=$2; shift ;;
+        --email) email=$2; shift ;;
+        --agree-tos) ;; # 兼容旧参数：安装时自动同意
+        *) die "未知参数：$1" ;;
+        esac
+        shift
+    done
+    require_root
+    if state_exists && [[ "$(state_get '.system.installed')" == "true" ]]; then
+        die "已经安装过了（${EZ_STATE}）。修改设置请用其他命令，重新安装请先 uninstall"
+    fi
+    [[ "${domain}" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "请用 --domain 指定域名，例如 --domain box.example.com"
+    check_os
+    check_legacy
+    info "证书由 Let's Encrypt 签发，安装即表示同意其服务条款：https://letsencrypt.org/repository/"
+    if [[ -n "${full}" ]]; then
+        protocols=$(IFS=,; echo "${EZ_PROTOCOLS[*]}")
+    elif [[ -z "${protocols}" ]]; then
+        protocols=$(IFS=,; echo "${EZ_PROTOCOLS_RECOMMENDED[*]}")
+    fi
+    [[ ",${protocols}," == *",reality-vision,"* ]] || die "Reality-Vision 必须安装（订阅和回落站点都依赖它）"
+    IFS=, read -ra plist <<<"${protocols}"
+    for p in "${plist[@]}"; do valid_protocol "${p}"; done
+
+    install_packages
+    ensure_service_user
+    mkdir -p "${EZ_ETC}" "${EZ_XRAY_CONF}" "${EZ_TLS}" "${EZ_SUB}" "${EZ_LOG}" "${EZ_SNAPSHOTS}"
+    # 上次安装没有完成时沿用已经生成的密钥、端口和用户
+    if state_exists; then
+        [[ "$(state_get .domain)" == "${domain}" ]] || die "上次未完成的安装用的是域名 $(state_get .domain)，请用同一个域名，或先运行 uninstall"
+        info "继续上次没有完成的安装"
+    else
+        state_init "${domain}"
+    fi
+    [[ -n "${range}" ]] && state_update '.portRange = $r' --arg r "${range}"
+    install_xray "${EZ_XRAY_RECOMMENDED}"
+
+    # 先只开 80 端口申请证书
+    install_site
+    mkdir -p "$(dirname "${EZ_NGINX_CONF}")"
+    render_nginx_conf >"${EZ_NGINX_CONF}"
+    nginx_test || die "Nginx 配置有误，请检查 /etc/nginx 下是否有其他站点占用了 80 端口的同一域名"
+    nginx_reload
+    sync_firewall
+    check_dns
+    issue_cert
+
+    enable_bbr
+    install_logrotate
+    install_service
+    for p in "${plist[@]}"; do protocol_enable_state "${p}"; done
+    if [[ "$(jq '.users | length' "${EZ_STATE}")" -eq 0 ]]; then
+        email=$(user_add_state "${email}")
+    else
+        email=$(jq -r '.users[0].email' "${EZ_STATE}")
+    fi
+    link_commands
+    ez_apply || die "安装没有完成，请根据上面的提示处理后重新运行同样的安装命令"
+    state_update '.system.installed = true'
+
+    ok "安装完成"
+    cmd_protocol_list
+    warn "请在云服务商的安全组里放行：$(required_ports | sort -u | tr '\n' ' ')"
+    cmd_sub "${email}"
+}
+
+# ---------- 协议 ----------
+
+cmd_protocol_list() {
+    local p state
+    for p in "${EZ_PROTOCOLS[@]}"; do
+        if protocol_enabled "${p}"; then
+            state="${C_GREEN}已开启${C_RESET}  $(proto_call "${p}" transport | tr a-z A-Z) $(proto_get "${p}" .port)"
+        else
+            state="未开启"
+        fi
+        printf '  %-18s %s\n' "$(proto_call "${p}" title)" "${state}"
+    done
+}
+
+cmd_protocol() {
+    need_installed
+    local action=${1:-list} p=${2:-} port=''
+    [[ "${3:-}" == "--port" ]] && port=${4:-}
+    case "${action}" in
+    list) cmd_protocol_list ;;
+    enable)
+        valid_protocol "${p}"
+        apply_change protocol_enable_state "${p}" "${port}" && ok "已开启 $(proto_call "${p}" title)，端口 $(proto_get "${p}" .port)"
+        ;;
+    disable)
+        valid_protocol "${p}"
+        [[ "${p}" == "reality-vision" ]] && die "Reality-Vision 不能关闭（订阅和回落站点都依赖它）"
+        apply_change proto_set "${p}" '{enabled: false}' && ok "已关闭 $(proto_call "${p}" title)"
+        ;;
+    *) die "用法：easyxray protocol list | enable 名称 [--port 端口] | disable 名称" ;;
+    esac
+}
+
+# ---------- 用户与订阅 ----------
+
+cmd_user() {
+    need_installed
+    local action=${1:-list} email=${2:-}
+    case "${action}" in
+    list) user_list ;;
+    add)
+        # 先确定邮箱，这样 apply 之后能显示这个用户的订阅
+        [[ -z "${email}" ]] && email=$(new_fake_email)
+        apply_change user_add_state "${email}" >/dev/null || return 1
+        ok "已添加用户：${email}"
+        cmd_sub "${email}"
+        ;;
+    del)
+        [[ -n "${email}" ]] || die "用法：easyxray user del 邮箱"
+        apply_change user_del_state "${email}" && ok "已删除用户：${email}"
+        ;;
+    *) die "用法：easyxray user list | add [邮箱] | del 邮箱" ;;
+    esac
+}
+
+cmd_sub() {
+    need_installed
+    local email=${1:-} uuid token url link
+    [[ -n "${email}" ]] && ! user_exists "${email}" && die "没有这个用户：${email}"
+    while IFS=$'\t' read -r email uuid token; do
+        url="https://$(state_get .domain)/s/${token}"
+        printf '\n'
+        ui_top
+        ui_title "${email}"
+        ui_rule
+        ui_row "订阅地址"
+        ui_row "${C_GREEN}${url}${C_RESET}"
+        ui_bottom
+        command -v qrencode >/dev/null 2>&1 && qrencode -t ANSIUTF8 -m 2 "${url}"
+        ui_top
+        ui_row "单条分享链接（也可以单独复制导入）"
+        ui_rule
+        while read -r link; do
+            ui_row "${C_CYAN}$(urldecode_name "${link}")${C_RESET}"
+            ui_row "${C_DIM}${link}${C_RESET}"
+            ui_blank
+        done < <(user_links "${uuid}" "${email}")
+        ui_bottom
+    done < <(jq -r --arg e "${email}" '.users[] | select($e == "" or .email == $e) | [.email, .uuid, .subToken] | @tsv' "${EZ_STATE}")
+    printf '\n'
+    warn "Shadowrocket：请在 设置 → TCP 中把 TLS 指纹设为 chrome140"
+    protocol_enabled hysteria2 && warn "Hysteria2：请在客户端里按自己宽带的实际速度填写上行/下行带宽"
+    return 0
+}
+
+# ---------- 分流与 WARP ----------
+
+cmd_route() {
+    need_installed
+    local action=${1:-list}
+    case "${action}" in
+    list) route_list ;;
+    add)
+        [[ -n "${2:-}" && -n "${3:-}" ]] || die "用法：easyxray route add 出口 规则（例如 route add warp-ipv4 anthropic,example.com）"
+        apply_change route_add_state "$2" "$3" && ok "已添加分流规则"
+        ;;
+    del)
+        [[ -n "${2:-}" ]] || die "用法：easyxray route del 出口 [规则]"
+        apply_change route_del_state "$2" "${3:-}" && ok "已删除分流规则"
+        ;;
+    quic)
+        case "${2:-}" in
+        block) apply_change state_update '.routing.blockQUIC = true' && ok "已开启 QUIC 屏蔽" ;;
+        allow) apply_change state_update '.routing.blockQUIC = false' && ok "已关闭 QUIC 屏蔽" ;;
+        *) die "用法：easyxray route quic block|allow" ;;
+        esac
+        ;;
+    *) die "用法：easyxray route list | add 出口 规则 | del 出口 [规则] | quic block|allow" ;;
+    esac
+}
+
+cmd_warp() {
+    need_installed
+    case "${1:-}" in
+    setup)
+        [[ -n "$(state_get '.outbounds["warp-ipv4"].privateKey')" ]] && die "WARP 已经配置过了"
+        apply_change warp_enable_state && ok "WARP 已开启，默认分流：${EZ_WARP_DEFAULT_RULES//,/、}"
+        ;;
+    remove) apply_change warp_remove_state warp-ipv4 && ok "已删除 WARP 出口和相关分流规则" ;;
+    *) die "用法：easyxray warp setup | remove" ;;
+    esac
+}
+
+# ---------- Xray 版本 ----------
+
+cmd_xray() {
+    need_installed
+    case "${1:-version}" in
+    version) printf '当前：%s  推荐：%s\n' "$(xray_installed_version)" "${EZ_XRAY_RECOMMENDED}" ;;
+    use)
+        local version=${2:-${EZ_XRAY_RECOMMENDED}} prev
+        require_root
+        prev="${EZ_XRAY_BIN}.prev"
+        cp -p "${EZ_XRAY_BIN}" "${prev}"
+        install_xray "${version}"
+        if apply_change state_update '.xray.version = $v' --arg v "${version}"; then
+            rm -f "${prev}"
+            ok "已切换到 Xray ${version}"
+        else
+            mv -f "${prev}" "${EZ_XRAY_BIN}"
+            xray_restart
+            die "新版本无法使用当前配置，已换回原来的版本"
+        fi
+        ;;
+    *) die "用法：easyxray xray version | use [版本]" ;;
+    esac
+}
+
+# ---------- 日志 ----------
+
+cmd_log() {
+    need_installed
+    case "${1:-show}" in
+    debug)
+        local minutes=${2:-30}
+        [[ "${minutes}" =~ ^[0-9]+$ ]] || die "分钟数不正确：${minutes}"
+        apply_change state_update '.system.logLevel = "debug"' || return 1
+        if ! no_system; then
+            systemctl stop easyxray-log-reset.timer 2>/dev/null
+            systemd-run --quiet --unit=easyxray-log-reset --on-active="${minutes}m" "${EZ_HOME}/easyxray" log normal
+        fi
+        ok "已打开调试日志，${minutes} 分钟后自动恢复。查看：tail -f ${EZ_LOG}/error.log ${EZ_LOG}/access.log"
+        ;;
+    normal) apply_change state_update '.system.logLevel = "warning"' && ok "日志已恢复为 warning，访问日志已关闭" ;;
+    show) tail -n 50 "${EZ_LOG}/error.log" 2>/dev/null ;;
+    *) die "用法：easyxray log debug [分钟] | normal | show" ;;
+    esac
+}
+
+# ---------- 卸载 ----------
+
+cmd_uninstall() {
+    require_root
+    local answer
+    read -r -p "确认卸载 easyxray？所有节点会停止工作，配置会删除 [y/N] " answer
+    [[ "${answer}" == "y" || "${answer}" == "Y" ]] || die "已取消"
+    if ! no_system; then
+        systemctl disable --now easyxray >/dev/null 2>&1
+        rm -f /etc/systemd/system/easyxray.service
+        systemctl daemon-reload
+        rm -f "${EZ_NGINX_CONF}" /etc/logrotate.d/easyxray /etc/letsencrypt/renewal-hooks/deploy/easyxray.sh
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx
+        remove_firewall_rules
+        rm -f /usr/local/bin/easyxray
+        [[ "$(readlink /usr/local/bin/ezx 2>/dev/null)" == "${EZ_HOME}/easyxray" ]] && rm -f /usr/local/bin/ezx
+    fi
+    rm -rf "${EZ_ETC}"
+    ok "已卸载。程序文件在 ${EZ_HOME}，确认不需要后可以手动删除；证书保留在 /etc/letsencrypt"
+}
+
+# ---------- 菜单 ----------
+
+menu_install() {
+    ui_banner
+    ui_rule
+    ui_row "${C_DIM}还没有安装，请选择安装方式：${C_RESET}"
+    ui_rule
+    ui_menu 1 "推荐安装" "" ""
+    ui_row "   ${C_DIM}Reality-Vision + Hysteria2，暴露的端口最少${C_RESET}"
+    ui_menu 2 "完全安装" "" ""
+    ui_row "   ${C_DIM}全部 5 个协议${C_RESET}"
+    ui_menu 0 "退出" "" ""
+    ui_bottom
+    local choice domain email
+    choice=$(ui_ask "请选择：")
+    case "${choice}" in
+    1 | 2)
+        domain=$(ui_ask "域名（已解析到本机，例如 box.example.com）：")
+        email=$(ui_ask "第一个用户的邮箱（直接回车自动生成）：")
+        if [[ "${choice}" == "2" ]]; then
+            (cmd_install --domain "${domain}" --full ${email:+--email "${email}"})
+        else
+            (cmd_install --domain "${domain}" ${email:+--email "${email}"})
+        fi
+        ui_pause
+        ;;
+    *) return 1 ;;
+    esac
+}
+
+# 让用户从编号列表里选一项，输出选中的序号（从 0 开始）；回车或 0 返回空
+pick_one() {
+    local prompt=$1 count=$2 choice
+    choice=$(ui_ask "${prompt}")
+    [[ "${choice}" =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= count)) || return 1
+    printf '%s' $((choice - 1))
+}
+
+# 多选：输入 1,3 这样的编号，输出选中的序号；回车返回空
+pick_many() {
+    local prompt=$1 count=$2 choice n chosen=()
+    choice=$(ui_ask "${prompt}")
+    choice=${choice// /}
+    [[ -n "${choice}" && "${choice}" != "0" ]] || return 1
+    IFS=, read -ra list <<<"${choice}"
+    for n in "${list[@]}"; do
+        [[ "${n}" =~ ^[0-9]+$ ]] && ((n >= 1 && n <= count)) || { warn "编号不正确：${n}"; return 1; }
+        chosen+=($((n - 1)))
+    done
+    printf '%s\n' "${chosen[@]}"
+}
+
+confirm() {
+    [[ "$(ui_ask "$1（1 确认，回车取消）：")" == "1" ]]
+}
+
+menu_users() {
+    local emails=() i idx
+    mapfile -t emails < <(jq -r '.users[].email' "${EZ_STATE}")
+    printf '\n'
+    ui_top
+    ui_title "用户管理"
+    ui_rule
+    for i in "${!emails[@]}"; do
+        ui_row "${C_DIM}$(pad "$((i + 1))" 3)${C_RESET}${emails[$i]}"
+    done
+    ui_rule
+    ui_menu 1 "添加用户" 2 "删除用户"
+    ui_menu 3 "查看某个用户的订阅" 0 "返回"
+    ui_bottom
+    case "$(ui_ask "请选择：")" in
+    1) (cmd_user add "$(ui_ask "邮箱（直接回车自动生成）：")") ;;
+    2)
+        idx=$(pick_one "删除第几个用户（回车返回）：" "${#emails[@]}") || return 0
+        confirm "确认删除 ${emails[$idx]}" || return 0
+        (cmd_user del "${emails[$idx]}")
+        ;;
+    3)
+        idx=$(pick_one "查看第几个用户（回车返回）：" "${#emails[@]}") || return 0
+        (cmd_sub "${emails[$idx]}")
+        ;;
+    *) return 0 ;;
+    esac
+    ui_pause
+}
+
+menu_protocols() {
+    local p i=1 idx
+    printf '\n'
+    ui_top
+    ui_title "协议管理"
+    ui_rule
+    for p in "${EZ_PROTOCOLS[@]}"; do
+        if protocol_enabled "${p}"; then
+            ui_row "${C_CYAN}${i}${C_RESET}  $(ui_status_dot on) $(pad "$(proto_call "${p}" title)" 20)$(proto_call "${p}" transport | tr '[:lower:]' '[:upper:]') $(proto_get "${p}" .port)"
+        else
+            ui_row "${C_CYAN}${i}${C_RESET}  $(ui_status_dot off) ${C_DIM}$(pad "$(proto_call "${p}" title)" 20)未开启${C_RESET}"
+        fi
+        i=$((i + 1))
+    done
+    ui_row "${C_CYAN}0${C_RESET}  返回"
+    ui_rule
+    ui_row "${C_DIM}选择编号切换开启/关闭；Reality-Vision 不能关闭${C_RESET}"
+    ui_bottom
+    idx=$(pick_one "请选择：" "${#EZ_PROTOCOLS[@]}") || return 0
+    p=${EZ_PROTOCOLS[$idx]}
+    if protocol_enabled "${p}"; then (cmd_protocol disable "${p}"); else (cmd_protocol enable "${p}"); fi
+    ui_pause
+}
+
+# 某个出口的全部规则，每行一条
+rules_of() {
+    jq -r --arg o "$1" '.routing.rules[]? | select(.outbound == $o) | ((.domains // []) + (.ips // []))[]' "${EZ_STATE}"
+}
+
+rule_hint() {
+    ui_row "${C_DIM}直接写名称即可（自动查 geosite 列表），例如 anthropic,openai,netflix${C_RESET}"
+    ui_row "${C_DIM}也可以写域名 example.com、IP 段 1.2.3.0/24，或 geoip:cn${C_RESET}"
+}
+
+# 删除某个出口下选中的规则
+delete_rules_of() {
+    local out=$1 i idx
+    local -a items=() picked=()
+    mapfile -t items < <(rules_of "${out}")
+    ((${#items[@]} > 0)) || { warn "没有可以删除的规则"; return 1; }
+    printf '\n'
+    for i in "${!items[@]}"; do ui_row "${C_CYAN}$((i + 1))${C_RESET}  ${items[$i]}"; done
+    while read -r idx; do picked+=("${items[$idx]}"); done < <(pick_many "删除哪几条（例如 1 或 1,3；回车返回）：" "${#items[@]}")
+    ((${#picked[@]} > 0)) || return 1
+    (cmd_route del "${out}" "$(IFS=,; echo "${picked[*]}")")
+}
+
+menu_other_rules() {
+    local out item n=0 items=() outs=() picked_direct=() picked_block=() idx choice target
+    printf '\n'
+    ui_top
+    ui_title "直连 / 屏蔽规则"
+    ui_rule
+    for out in direct block; do
+        while read -r item; do
+            [[ -z "${item}" ]] && continue
+            n=$((n + 1))
+            items+=("${item}")
+            outs+=("${out}")
+            ui_row "${C_DIM}$(pad "${n}" 3)${C_RESET}$(pad "$([[ "${out}" == direct ]] && echo 直连 || echo 屏蔽)" 6)${item}"
+        done < <(rules_of "${out}")
+    done
+    ((n == 0)) && ui_row "${C_DIM}还没有直连或屏蔽规则${C_RESET}"
+    ui_rule
+    ui_menu 1 "添加直连规则" 2 "添加屏蔽规则"
+    ui_menu 3 "删除规则" 0 "返回"
+    ui_bottom
+    choice=$(ui_ask "请选择：")
+    case "${choice}" in
+    1 | 2)
+        target=direct
+        [[ "${choice}" == "2" ]] && target=block
+        rule_hint
+        item=$(ui_ask "规则（回车返回）：")
+        [[ -n "${item// /}" ]] || return 0
+        (cmd_route add "${target}" "${item}")
+        ;;
+    3)
+        ((n > 0)) || { warn "没有可以删除的规则"; ui_pause; return 0; }
+        while read -r idx; do
+            if [[ "${outs[$idx]}" == direct ]]; then picked_direct+=("${items[$idx]}"); else picked_block+=("${items[$idx]}"); fi
+        done < <(pick_many "删除哪几条（例如 1 或 1,3；回车返回）：" "${n}")
+        ((${#picked_direct[@]} + ${#picked_block[@]} > 0)) || return 0
+        ((${#picked_direct[@]} > 0)) && (cmd_route del direct "$(IFS=,; echo "${picked_direct[*]}")")
+        ((${#picked_block[@]} > 0)) && (cmd_route del block "$(IFS=,; echo "${picked_block[*]}")")
+        ;;
+    *) return 0 ;;
+    esac
+    ui_pause
+}
+
+menu_routing() {
+    local warp quic warp_rules=() i choice
+    if [[ -n "$(state_get '.outbounds["warp-ipv4"].privateKey')" ]]; then warp=on; else warp=off; fi
+    [[ "$(state_get '.routing.blockQUIC')" == "true" ]] && quic=on || quic=off
+    mapfile -t warp_rules < <(rules_of warp-ipv4)
+    printf '\n'
+    ui_top
+    ui_title "分流管理"
+    ui_rule
+    ui_row "$(ui_status_dot "${warp}") WARP $([[ "${warp}" == on ]] && echo 已开启 || echo 未开启)"
+    if [[ "${warp}" == on ]]; then
+        if ((${#warp_rules[@]} > 0)); then
+            for i in "${!warp_rules[@]}"; do ui_row "   ${C_DIM}$(pad "$((i + 1))" 3)${C_RESET}${warp_rules[$i]}"; done
+        else
+            ui_row "   ${C_DIM}还没有 WARP 规则${C_RESET}"
+        fi
+    fi
+    ui_rule
+    if [[ "${warp}" == on ]]; then
+        ui_menu 1 "关闭 WARP" 2 "添加 WARP 规则"
+    else
+        ui_menu 1 "开启 WARP" 2 "添加 WARP 规则"
+    fi
+    ui_menu 3 "删除 WARP 规则" 4 "直连 / 屏蔽规则"
+    ui_menu 5 "QUIC 屏蔽：$([[ "${quic}" == on ]] && echo 开 || echo 关)" 0 "返回"
+    [[ "${warp}" == off ]] && ui_row "${C_DIM}开启 WARP 时默认分流 ${EZ_WARP_DEFAULT_RULES//,/、}${C_RESET}"
+    ui_row "${C_DIM}QUIC 屏蔽一般不需要开启，只在 QUIC 请求没有按规则分流时使用${C_RESET}"
+    ui_bottom
+    choice=$(ui_ask "请选择：")
+    case "${choice}" in
+    1)
+        if [[ "${warp}" == on ]]; then
+            confirm "关闭 WARP 会同时删除所有 WARP 规则，确认" || return 0
+            (cmd_warp remove)
+        else
+            (cmd_warp setup)
+        fi
+        ;;
+    2)
+        [[ "${warp}" == on ]] || { warn "请先开启 WARP"; ui_pause; return 0; }
+        rule_hint
+        local items
+        items=$(ui_ask "WARP 规则（回车返回）：")
+        [[ -n "${items// /}" ]] || return 0
+        (cmd_route add warp-ipv4 "${items}")
+        ;;
+    3) delete_rules_of warp-ipv4 || { ui_pause; return 0; } ;;
+    4) menu_other_rules; return 0 ;;
+    5) if [[ "${quic}" == on ]]; then (cmd_route quic allow); else (cmd_route quic block); fi ;;
+    *) return 0 ;;
+    esac
+    ui_pause
+}
+
+menu_xray() {
+    local v
+    printf '\n'
+    ui_top
+    ui_title "Xray 版本"
+    ui_rule
+    ui_row "当前 $(xray_installed_version)    推荐 ${EZ_XRAY_RECOMMENDED}"
+    ui_rule
+    ui_menu 1 "切换到推荐版本" 2 "指定其他版本"
+    ui_menu 0 "返回" "" ""
+    ui_bottom
+    case "$(ui_ask "请选择：")" in
+    1) (cmd_xray use "${EZ_XRAY_RECOMMENDED}") ;;
+    2)
+        v=$(ui_ask "版本号（例如 v26.10.21，回车返回）：")
+        [[ -n "${v}" ]] || return 0
+        (cmd_xray use "${v}")
+        ;;
+    *) return 0 ;;
+    esac
+    ui_pause
+}
+
+menu() {
+    local choice
+    while :; do
+        printf '\n'
+        if ! state_exists || [[ "$(state_get '.system.installed')" != "true" ]]; then
+            menu_install || return 0
+            continue
+        fi
+        ui_dashboard
+        ui_rule
+        ui_menu 1 "查看订阅" 2 "用户管理"
+        ui_menu 3 "协议管理" 4 "分流管理"
+        ui_menu 5 "诊断" 6 "Xray 版本"
+        ui_menu 7 "调试日志" 8 "恢复上一份配置"
+        ui_menu 9 "卸载" 0 "退出"
+        ui_bottom
+        choice=$(ui_ask "请选择：")
+        case "${choice}" in
+        1) (cmd_sub); ui_pause ;;
+        2) menu_users ;;
+        3) menu_protocols ;;
+        4) menu_routing ;;
+        5) printf '\n'; (ez_doctor); ui_pause ;;
+        6) menu_xray ;;
+        7) (cmd_log debug "$(ui_ask "打开多少分钟（直接回车 30）：")"); ui_pause ;;
+        8) (ez_rollback); ui_pause ;;
+        9) (cmd_uninstall) && return 0 ;;
+        0 | '') return 0 ;;
+        esac
+    done
+}
+
+main() {
+    local cmd=${1:-menu}
+    EZ_CMD=${*}
+    shift || true
+    # 状态文件里有密钥，权限是 600，除了 help 以外的命令都需要 root
+    case "${cmd}" in
+    help | -h | --help) ;;
+    *) require_root ;;
+    esac
+    case "${cmd}" in
+    install) cmd_install "$@" ;;
+    protocol) cmd_protocol "$@" ;;
+    user) cmd_user "$@" ;;
+    sub) cmd_sub "$@" ;;
+    route) cmd_route "$@" ;;
+    warp) cmd_warp "$@" ;;
+    xray) cmd_xray "$@" ;;
+    log) cmd_log "$@" ;;
+    apply) require_root; need_installed; ez_apply && ok "配置已更新" ;;
+    rollback) require_root; need_installed; ez_rollback ;;
+    doctor) need_installed; ez_doctor ;;
+    uninstall) cmd_uninstall ;;
+    menu) require_root; menu ;;
+    help | -h | --help) usage ;;
+    *) usage; exit 1 ;;
+    esac
+}
+
+main "$@"
