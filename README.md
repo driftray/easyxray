@@ -26,6 +26,7 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
   - [非交互式安装](#非交互式安装)
   - [手动安装](#手动安装)
 - [客户端设置](#客户端设置)
+  - [推荐客户端](#推荐客户端)
 - [菜单使用说明](#菜单使用说明)
 - [命令参考](#命令参考)
 - [工作原理](#工作原理)
@@ -194,10 +195,12 @@ sudo ezx sub
 
 将订阅地址导入客户端。节点名称格式为「用户名_协议名」，例如 `alice_Reality-Vision`。
 
-| 客户端 | 设置 |
-|---|---|
-| Shadowrocket | 在「设置 → TCP」中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 `chrome140`、`safari26_3` |
-| v2rayN | 使用默认设置 |
+### 推荐客户端
+
+| 客户端 | 平台 | 获取 | 设置 |
+|---|---|---|---|
+| Shadowrocket | iOS、iPadOS、macOS（Apple 芯片） | [App Store](https://apps.apple.com/us/app/shadowrocket/id932747118)（付费，需非中国大陆区账号） | 在「设置 → TCP」中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 `chrome140`、`safari26_3` |
+| v2rayN | Windows、macOS、Linux | [GitHub](https://github.com/2dust/v2rayN/releases) | 使用默认设置 |
 
 使用 Hysteria2 节点时，在客户端中按自己宽带的实际速度填写上行 / 下行带宽，下行建议填实测下载速度的 80%~90%。
 
