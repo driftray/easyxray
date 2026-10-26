@@ -83,8 +83,8 @@ if [[ -r /etc/os-release ]]; then
     # shellcheck source=/dev/null
     . /etc/os-release
     case "${ID:-}" in
-    debian) if [[ "${VERSION_ID%%.*}" -ge 12 ]]; then pass "系统 ${PRETTY_NAME}"; else fail "Debian 版本太旧（${VERSION_ID}），需要 12 或更新"; fi ;;
-    ubuntu) if [[ "${VERSION_ID%%.*}" -ge 22 ]]; then pass "系统 ${PRETTY_NAME}"; else fail "Ubuntu 版本太旧（${VERSION_ID}），需要 22.04 或更新"; fi ;;
+    debian) if [[ "${VERSION_ID%%.*}" -ge 12 ]]; then pass "系统 Debian 12+ / Ubuntu 22.04+"; else fail "Debian 版本太旧（${VERSION_ID}），需要 12 或更新"; fi ;;
+    ubuntu) if [[ "${VERSION_ID%%.*}" -ge 22 ]]; then pass "系统 Debian 12+ / Ubuntu 22.04+"; else fail "Ubuntu 版本太旧（${VERSION_ID}），需要 22.04 或更新"; fi ;;
     *) fail "不支持的系统：${PRETTY_NAME:-${ID:-未知}}，只支持 Debian 12+ 和 Ubuntu 22.04+" ;;
     esac
 else
@@ -92,7 +92,7 @@ else
 fi
 
 case "$(uname -m)" in
-x86_64 | amd64 | aarch64 | arm64) pass "CPU 架构 $(uname -m)" ;;
+x86_64 | amd64 | aarch64 | arm64) pass "CPU 架构 x86_64 / arm64" ;;
 *) fail "不支持的 CPU 架构：$(uname -m)，只支持 x86_64 和 arm64" ;;
 esac
 
@@ -122,12 +122,12 @@ owner() {
 }
 if command -v ss >/dev/null 2>&1; then
     if [[ -z "$(ss -Hltn 'sport = :443' 2>/dev/null)" ]]; then
-        pass "TCP 443 空闲"
+        pass "TCP 443 空闲（Reality-Vision）"
     else
         fail "TCP 443 已被 $(owner 443) 占用，Reality-Vision 需要使用 443"
     fi
     if [[ -z "$(ss -Hltn 'sport = :80' 2>/dev/null)" || "$(owner 80)" == "nginx" ]]; then
-        pass "TCP 80 可用"
+        pass "TCP 80 可用（申请证书）"
     else
         fail "TCP 80 已被 $(owner 80) 占用，申请证书需要用 Nginx 监听 80"
     fi
@@ -142,7 +142,7 @@ fi
 
 free_mb=$(df -Pm / | awk 'NR==2 {print $4}')
 if [[ "${free_mb:-0}" -ge 300 ]]; then
-    pass "磁盘剩余 ${free_mb} MB"
+    pass "磁盘剩余空间 ≥ 300 MB"
 else
     fail "磁盘剩余空间不足：${free_mb} MB，至少需要 300 MB"
 fi

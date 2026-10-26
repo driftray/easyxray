@@ -104,14 +104,14 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 ```
 检查环境
   ✓ root 权限
-  ✓ 系统 Ubuntu 24.04.5 LTS
-  ✓ CPU 架构 x86_64
+  ✓ 系统 Debian 12+ / Ubuntu 22.04+
+  ✓ CPU 架构 x86_64 / arm64
   ✓ systemd
   ✓ 没有发现其他代理脚本或面板
-  ✓ TCP 443 空闲
-  ✓ TCP 80 可用
+  ✓ TCP 443 空闲（Reality-Vision）
+  ✓ TCP 80 可用（申请证书）
   ✓ IPv4 网络
-  ✓ 磁盘剩余 45113 MB
+  ✓ 磁盘剩余空间 ≥ 300 MB
   ✓ 下载工具 curl
   ✓ 可以访问 github.com
 
@@ -127,7 +127,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 | CPU 架构 | x86_64 或 arm64 |
 | systemd | 必须使用 systemd（OpenVZ、LXC 等容器可能不满足） |
 | 其他代理 | 没有 v2ray-agent、x-ui / 3x-ui，没有正在运行的 xray、v2ray、sing-box、hysteria-server 服务 |
-| 端口 | TCP 443 空闲；TCP 80 空闲或由 Nginx 使用 |
+| 端口 | TCP 443 空闲；TCP 80 空闲或由 Nginx 使用。其他协议的端口在安装时随机选择空闲端口，不在这里检查 |
 | 磁盘 | 至少 300 MB 剩余空间 |
 | IPv4 | 有 IPv4 默认路由（纯 IPv6 VPS 不支持） |
 | 网络 | 能访问 github.com；缺少 curl 或 ca-certificates 时自动安装 |
@@ -238,10 +238,10 @@ sudo ezx sub
 │
 ├────────────────────────────────────────────────────────
 │ 域名   box.example.com
-│ 状态   ● Xray v26.10.21 运行中    用户 2    ● WARP 已开启
+│ 状态   ● Xray v26.10.21 运行中    用户 1    ● WARP 已开启
 ├────────────────────────────────────────────────────────
 │ ● Reality-Vision      TCP 443
-│ ● Hysteria2           UDP 8086
+│ ● Hysteria2           UDP 8042
 │ ○ XHTTP-TLS           未开启
 │ ○ Reality-XHTTP       未开启
 │ ○ VLESS-TLS-Vision    未开启
@@ -284,7 +284,7 @@ sudo ezx sub
 │ 协议管理
 ├────────────────────────────────────────────────────────
 │ 1  ● Reality-Vision      TCP 443
-│ 2  ● Hysteria2           UDP 8086
+│ 2  ● Hysteria2           UDP 8042
 │ 3  ○ XHTTP-TLS           未开启
 │ 4  ○ Reality-XHTTP       未开启
 │ 5  ○ VLESS-TLS-Vision    未开启
