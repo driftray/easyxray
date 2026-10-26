@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # VLESS + Reality + XHTTP：和 Reality-Vision 共用回落站点，单独生成密钥和 shortId
-# Shadowrocket 需要在 设置 → TCP 中把 TLS 指纹设为 chrome140
+# Shadowrocket 需要在 设置 → TCP 中选择支持 X25519MLKEM768 的较新 TLS 指纹（例如 chrome140）
 
 reality_xhttp_title() { printf 'Reality-XHTTP'; }
 reality_xhttp_transport() { printf 'tcp'; }

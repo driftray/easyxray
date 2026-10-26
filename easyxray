@@ -218,7 +218,7 @@ cmd_sub() {
         ui_bottom
     done < <(jq -r --arg e "${email}" '.users[] | select($e == "" or .email == $e) | [.email, .uuid, .subToken] | @tsv' "${EZ_STATE}")
     printf '\n'
-    warn "Shadowrocket：请在 设置 → TCP 中把 TLS 指纹设为 chrome140"
+    warn "Shadowrocket：请在 设置 → TCP 中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 chrome140、safari26_3"
     protocol_enabled hysteria2 && warn "Hysteria2：请在客户端里按自己宽带的实际速度填写上行/下行带宽"
     return 0
 }

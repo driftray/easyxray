@@ -72,7 +72,7 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 
    系统自带的防火墙（ufw / firewalld / iptables）由 easyxray 自动配置。
 
-4. **服务器上没有其他 Xray 管理脚本**，以免端口和证书冲突。
+4. **服务器上没有安装其他代理管理脚本或面板**，以免端口和证书冲突。
 
 ## 安装
 
@@ -152,7 +152,7 @@ sudo ezx sub
 
 | 客户端 | 设置 |
 |---|---|
-| Shadowrocket | 在「设置 → TCP」中将 TLS 指纹设为 `chrome140` |
+| Shadowrocket | 在「设置 → TCP」中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 `chrome140`、`safari26_3` |
 | v2rayN | 使用默认设置 |
 | Hysteria2 节点 | 按自己宽带的实际速度填写上行 / 下行带宽，下行建议填实测下载速度的 80%~90% |
 
