@@ -95,5 +95,42 @@ x protocol disable hysteria2 >/dev/null 2>&1
 x rollback >/dev/null 2>&1
 check "rollback 恢复到关闭 Hysteria2 之前" cfg '[.inbounds[].tag] | index("hysteria2")'
 
+echo "更新"
+# 在程序目录的副本上测试，用本地目录代替 Release 下载地址；发布包里的版本号改成 9.9.9 以便确认已替换
+P="${R}/prog" REL="${R}/rel"
+mkdir -p "${P}" "${REL}/src"
+(cd "${HERE}" && tar --exclude .git --exclude tests --exclude tools -cf - .) | tar -xf - -C "${REL}/src"
+(cd "${HERE}" && tar --exclude .git -cf - .) | tar -xf - -C "${P}"
+mkdir -p "${P}/bin" "${P}/.git" && touch "${P}/bin/marker"
+perl -pi -e 's/^EZ_VERSION=.*/EZ_VERSION=9.9.9/' "${REL}/src/lib/common.sh"
+(cd "${REL}/src" && tar -czf ../easyxray.tar.gz .) && (cd "${REL}" && shasum -a 256 easyxray.tar.gz >easyxray.tar.gz.sha256)
+up() { EZ_HOME="${P}" EZ_RELEASE_BASE="file://${REL}" bash "${P}/easyxray" update "$@"; }
+cp "${REL}/easyxray.tar.gz.sha256" "${REL}/good.sha256"
+echo "0000000000000000000000000000000000000000000000000000000000000000  easyxray.tar.gz" >"${REL}/easyxray.tar.gz.sha256"
+check "SHA256 不符时拒绝更新" bash -c "! EZ_HOME=${P} EZ_RELEASE_BASE=file://${REL} bash ${P}/easyxray update 9.9.9"
+check "拒绝更新后程序没有变化" cmp -s "${HERE}/lib/common.sh" "${P}/lib/common.sh"
+cp "${REL}/good.sha256" "${REL}/easyxray.tar.gz.sha256"
+up 9.9.9 >/dev/null 2>&1
+check "更新后是新版本" grep -q '^EZ_VERSION=9.9.9' "${P}/lib/common.sh"
+check "更新保留 bin/ 里的 Xray" test -f "${P}/bin/marker"
+check "更新删除 git clone 留下的 .git" test ! -e "${P}/.git"
+check "更新后配置仍然有效" xray_ok
+
+echo "卸载"
+S="${R}/etc/easyxray/state.json"
+jq -S '{users, protocols}' "${S}" >"${R}/keys.before"
+echo n | x uninstall --keep-config >/dev/null 2>&1
+check "回答 n 时不卸载" jq -e '.system.installed == true' "${S}"
+echo y | x uninstall --keep-config >/dev/null 2>&1
+check "保留配置卸载后状态文件还在" jq -e '.system.installed == false' "${S}"
+x install >/dev/null 2>&1
+check "重新安装不用填域名，标记为已安装" jq -e '.system.installed == true' "${S}"
+jq -S '{users, protocols}' "${S}" >"${R}/keys.after"
+check "重新安装沿用用户、端口和密钥" cmp -s "${R}/keys.before" "${R}/keys.after"
+check "重新安装后配置有效" xray_ok
+echo y | x uninstall --purge >/dev/null 2>&1
+check "完全卸载删除 /etc/easyxray" test ! -e "${R}/etc/easyxray"
+check "测试模式下完全卸载不删除源码目录" test -f "${HERE}/easyxray"
+
 printf '\n通过 %d，失败 %d\n' "${pass}" "${fail}"
 ((fail == 0))

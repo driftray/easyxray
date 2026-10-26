@@ -21,7 +21,9 @@ EZ_NGINX_CONF=${EZ_ROOT}/etc/nginx/conf.d/easyxray.conf
 EZ_USER=easyxray
 
 # easyxray 自身的版本
-EZ_VERSION=0.1.0
+EZ_VERSION=0.2.0
+# 发布地址：更新时从这个仓库的 GitHub Release 下载
+EZ_REPO=driftray/easyxray
 
 # 推荐的 Xray 版本：26.10.21 起 Reality 不接受旧版 TLS 指纹，订阅链接因此不带 fp
 EZ_XRAY_RECOMMENDED=v26.10.21
