@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 打包发布文件：从当前提交生成 dist/easyxray.tar.gz 和 dist/easyxray.tar.gz.sha256
+# 安装入口 install.sh 不进 Release，用户直接从仓库 main 分支下载
 # tests、tools 等开发文件不打包（见 .gitattributes）。文件名固定，安装地址可以一直用 releases/latest/download/
 # 用法：bash tools/release.sh [输出目录]
 set -euo pipefail

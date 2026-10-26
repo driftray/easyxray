@@ -24,8 +24,9 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 - [支持的协议](#支持的协议)
 - [安装前准备](#安装前准备)
 - [安装](#安装)
-  - [命令式安装](#命令式安装)
   - [交互式安装](#交互式安装)
+  - [非交互式安装](#非交互式安装)
+  - [手动安装](#手动安装)
 - [客户端设置](#客户端设置)
 - [菜单使用说明](#菜单使用说明)
 - [命令参考](#命令参考)
@@ -77,52 +78,63 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 
 ## 安装
 
-以 root 身份下载最新版本，校验 SHA256 后解压到 `/opt/easyxray`：
+以 root 身份下载并运行安装脚本 `install.sh`：
 
 ```bash
 sudo -i
-apt-get update && apt-get install -y curl ca-certificates
-mkdir -p /opt/easyxray && cd /opt/easyxray
-curl -fLO https://github.com/driftray/easyxray/releases/latest/download/easyxray.tar.gz
-curl -fLO https://github.com/driftray/easyxray/releases/latest/download/easyxray.tar.gz.sha256
-sha256sum -c easyxray.tar.gz.sha256 && tar -xzf easyxray.tar.gz && rm -f easyxray.tar.gz*
+wget -N https://raw.githubusercontent.com/driftray/easyxray/main/install.sh && bash install.sh
 ```
 
-已经是 root 时不需要 `sudo -i`（部分精简系统没有安装 sudo）。`sha256sum -c` 显示 `easyxray.tar.gz: OK` 才会解压。需要安装指定版本时，把地址中的 `latest/download` 换成 `download/v0.2.0` 这样的版本号。
-
-### 命令式安装
+已经是 root 时不需要 `sudo -i`（部分精简系统没有安装 sudo）。没有 wget 时用 curl：
 
 ```bash
-# 推荐安装：Reality-Vision + Hysteria2
-/opt/easyxray/easyxray install --domain box.example.com
-
-# 完全安装：全部 5 个协议
-/opt/easyxray/easyxray install --domain box.example.com --full
+curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh && bash install.sh
 ```
 
-| 参数 | 说明 |
+以后每次都可以用同一条命令：没有安装时进行安装，已经安装时进入管理菜单，有新版本时会提示。安装完成后也可以直接使用 `easyxray` 或快捷命令 `ezx`，下文以 `ezx` 为例。
+
+### 安装脚本做什么
+
+1. **检查环境**，全部通过才继续；有问题时列出所有问题后停止，不做任何修改。
+2. **下载程序包**：从 GitHub Release 下载最新版本的 `easyxray.tar.gz`，校验 SHA256 后解压到 `/opt/easyxray`。
+3. **开始安装**：没有参数时进入安装菜单（交互式），带参数时直接安装（非交互式）。
+
+```
+检查环境
+  ✓ root 权限
+  ✓ 系统 Ubuntu 24.04.5 LTS
+  ✓ CPU 架构 x86_64
+  ✓ systemd
+  ✓ 没有发现其他代理脚本或面板
+  ✓ TCP 443 空闲
+  ✓ TCP 80 可用
+  ✓ 磁盘剩余 45113 MB
+  ✓ 下载工具 curl
+  ✓ 可以访问 github.com
+
+下载 easyxray
+  ✓ SHA256 校验通过
+  ✓ 已解压到 /opt/easyxray（0.2.0）
+```
+
+| 检查项 | 要求 |
 |---|---|
-| `--domain 域名` | 必填，已解析到本机的域名 |
-| `--full` | 安装全部 5 个协议 |
-| `--protocols a,b` | 指定要安装的协议，例如 `--protocols reality-vision,xhttp-tls`，必须包含 `reality-vision` |
-| `--port-range 起-止` | 随机端口的范围，默认 `8000-8100` |
-| `--email 邮箱` | 第一个用户的邮箱，不填时自动生成 `随机前缀@xray.fake` |
+| 权限 | root |
+| 系统 | Debian 12+ 或 Ubuntu 22.04+ |
+| CPU 架构 | x86_64 或 arm64 |
+| systemd | 必须使用 systemd（OpenVZ、LXC 等容器可能不满足） |
+| 其他代理 | 没有 v2ray-agent、x-ui / 3x-ui，没有正在运行的 xray、v2ray、sing-box、hysteria-server 服务 |
+| 端口 | TCP 443 空闲；TCP 80 空闲或由 Nginx 使用 |
+| 磁盘 | 至少 300 MB 剩余空间 |
+| 网络 | 能访问 github.com；缺少 curl 或 ca-certificates 时自动安装 |
 
-安装依次完成：安装软件包 → 下载并校验 Xray → 申请证书 → 开启 BBR → 配置日志轮转 → 生成配置并启动服务。完成后显示各协议的端口、需要在安全组放行的端口，以及第一个用户的订阅地址和二维码。
+安装过程依次完成：安装软件包 → 下载并校验 Xray → 申请证书 → 开启 BBR → 配置日志轮转 → 生成配置并启动服务。完成后显示各协议的端口、需要在安全组放行的端口，以及第一个用户的订阅地址和二维码。
 
-证书由 Let's Encrypt 签发，安装即表示同意其[服务条款](https://letsencrypt.org/repository/)。
-
-安装中途失败时，按提示处理后重新运行同一条命令即可继续，已生成的密钥、端口和用户会保留。
-
-安装完成后可以使用 `easyxray` 或快捷命令 `ezx`，下文以 `ezx` 为例。
+证书由 Let's Encrypt 签发，安装即表示同意其[服务条款](https://letsencrypt.org/repository/)。安装中途失败时，按提示处理后重新运行同一条命令即可继续，已生成的密钥、端口和用户会保留。
 
 ### 交互式安装
 
-不带参数运行，进入安装菜单：
-
-```bash
-/opt/easyxray/easyxray
-```
+不带参数运行 `bash install.sh`，环境检查和下载完成后进入安装菜单：
 
 ```
 ╭────────────────────────────────────────────────────────
@@ -145,6 +157,51 @@ sha256sum -c easyxray.tar.gz.sha256 && tar -xzf easyxray.tar.gz && rm -f easyxra
 ```
 
 选择 1 或 2，按提示输入域名和第一个用户的邮箱（直接回车自动生成）即可。
+
+### 非交互式安装
+
+在 `install.sh` 后面加上安装参数，全程不提问，适合自动化部署（例如云服务器的 cloud-init 或批量部署脚本）：
+
+```bash
+# 推荐安装：Reality-Vision + Hysteria2
+bash install.sh --domain box.example.com
+
+# 完全安装：全部 5 个协议，并指定第一个用户的邮箱
+bash install.sh --domain box.example.com --full --email alice@example.com
+
+# 不保存脚本，下载后直接运行
+curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh | bash -s -- --domain box.example.com --full
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--domain 域名` | 必填，已解析到本机的域名 |
+| `--full` | 安装全部 5 个协议 |
+| `--protocols a,b` | 指定要安装的协议，例如 `--protocols reality-vision,xhttp-tls`，必须包含 `reality-vision` |
+| `--port-range 起-止` | 随机端口的范围，默认 `8000-8100` |
+| `--email 邮箱` | 第一个用户的邮箱，不填时自动生成 `随机前缀@xray.fake` |
+| `--version 版本` | 安装指定版本，例如 `--version v0.2.0`，不填时安装最新版本 |
+
+- 没有终端（例如通过管道运行）又没有给参数时，安装脚本会直接报错退出，不会卡在等待输入。
+- 服务器上有[保留配置卸载](#卸载)留下的配置时，不需要参数，会沿用原来的域名、用户、端口和密钥。
+- 已经安装时带参数运行，只提示已经安装，不会重复安装，可以放心在部署脚本里重复执行。
+- 程序已经下载到 `/opt/easyxray` 时，也可以直接运行 `/opt/easyxray/easyxray install --domain box.example.com`，参数相同。
+
+### 手动安装
+
+想自己完成每一步，可以不使用安装脚本：
+
+```bash
+sudo -i
+apt-get update && apt-get install -y curl ca-certificates
+mkdir -p /opt/easyxray && cd /opt/easyxray
+curl -fLO https://github.com/driftray/easyxray/releases/latest/download/easyxray.tar.gz
+curl -fLO https://github.com/driftray/easyxray/releases/latest/download/easyxray.tar.gz.sha256
+sha256sum -c easyxray.tar.gz.sha256 && tar -xzf easyxray.tar.gz && rm -f easyxray.tar.gz*
+/opt/easyxray/easyxray
+```
+
+`sha256sum -c` 显示 `easyxray.tar.gz: OK` 才会解压。
 
 ## 客户端设置
 
