@@ -188,7 +188,7 @@ x install --domain test.example.com --full >/dev/null 2>&1
 x user add bob@example.com >/dev/null 2>&1
 jq -S '{users, protocols, routing}' "${S}" >"${R}/bk.before"
 x backup "${R}/bk.tar.gz" >/dev/null 2>&1
-check "备份文件权限是 600" bash -c "[[ \$(stat -f %Lp ${R}/bk.tar.gz 2>/dev/null || stat -c %a ${R}/bk.tar.gz) == 600 ]]"
+check "备份文件权限是 600" bash -c "[[ \$(stat -c %a ${R}/bk.tar.gz 2>/dev/null || stat -f %Lp ${R}/bk.tar.gz) == 600 ]]"
 check "已安装时拒绝恢复" bash -c "! bash ${HERE}/easyxray install --restore ${R}/bk.tar.gz"
 echo y | x uninstall --purge >/dev/null 2>&1
 mkdir -p "${R}/etc/easyxray/tls"
