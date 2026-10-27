@@ -194,7 +194,7 @@ mkdir -p "${HOME_DIR}"
 find "${HOME_DIR}" -mindepth 1 -maxdepth 1 ! -name bin -exec rm -rf {} +
 cp -a "${tmp}/new/." "${HOME_DIR}/"
 chmod 755 "${HOME_DIR}/easyxray"
-pass "已解压到 ${HOME_DIR}（$(sed -n 's/^EZ_VERSION=//p' "${HOME_DIR}/lib/common.sh")）"
+pass "已解压到 ${HOME_DIR}"
 printf '\n'
 # exec 不会触发 EXIT trap，先删除临时目录
 rm -rf "${tmp}"

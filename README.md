@@ -116,7 +116,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 
 下载 easyxray
   ✓ SHA256 校验通过
-  ✓ 已解压到 /opt/easyxray（0.2.0）
+  ✓ 已解压到 /opt/easyxray
 ```
 
 安装过程依次完成：安装软件包 → 下载并校验 Xray → 申请证书 → 开启 BBR → 配置日志轮转 → 生成配置并启动服务。完成后显示各协议的端口、需要在安全组放行的端口，以及第一个用户的订阅地址和二维码。
