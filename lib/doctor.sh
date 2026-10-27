@@ -12,7 +12,7 @@ ez_doctor() {
     v=$(xray_installed_version)
     if [[ "${v}" == "${EZ_XRAY_RECOMMENDED}" ]]; then doc_ok "Xray ${v}（推荐版本）"; else doc_warn "Xray ${v:-未安装}，推荐版本是 ${EZ_XRAY_RECOMMENDED}"; fi
     if systemctl is-active nginx >/dev/null 2>&1; then
-        doc_ok "Nginx 运行中：$(nginx -v 2>&1 | grep -oE '[0-9.]+$')，$(openssl version | awk '{print $1, $2}')"
+        doc_ok "Nginx 运行中：$(nginx -v 2>&1 | sed -n 's#.*nginx/\([0-9.]*\).*#\1#p')，$(openssl version | awk '{print $1, $2}')"
     else
         doc_bad "Nginx 没有运行"
     fi
