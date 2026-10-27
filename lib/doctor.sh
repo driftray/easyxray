@@ -64,6 +64,8 @@ ez_doctor() {
         doc_ok "没有配置 WARP"
     fi
     if [[ "$(state_get '.routing.blockQUIC')" == "true" ]]; then doc_ok "QUIC 屏蔽：开启"; else doc_ok "QUIC 屏蔽：关闭"; fi
+    if bt_blocked; then doc_ok "BT 屏蔽：开启"; else doc_warn "BT 屏蔽：关闭（VPS 被用来下载 BT 容易收到版权投诉）"; fi
+    if geo_auto_enabled || no_system; then doc_ok "geo 数据 $(geo_date)，每周自动更新"; else doc_warn "geo 数据 $(geo_date)，没有开启自动更新（ezx geo auto on）"; fi
 
     info "配置一致性"
     current="${EZ_XRAY_CONF}/config.json"

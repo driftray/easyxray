@@ -93,4 +93,8 @@ route_del_state() {
 route_list() {
     jq -r '.routing.rules[]? | "\(.outbound):\n  " + (((.domains // []) + (.ips // [])) | join("\n  "))' "${EZ_STATE}"
     printf 'QUIC 屏蔽：%s\n' "$([[ "$(state_get '.routing.blockQUIC')" == "true" ]] && echo 开启 || echo 关闭)"
+    printf 'BT 屏蔽：%s\n' "$(bt_blocked && echo 开启 || echo 关闭)"
 }
+
+# BT 屏蔽默认开启：状态文件里没有这一项时也算开启
+bt_blocked() { [[ "$(jq -r '.routing.blockBT != false' "${EZ_STATE}")" == "true" ]]; }

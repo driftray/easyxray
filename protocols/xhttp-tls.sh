@@ -6,6 +6,7 @@
 xhttp_tls_title() { printf 'XHTTP-TLS'; }
 xhttp_tls_transport() { printf 'tcp'; }
 xhttp_tls_listener() { printf 'nginx'; }
+xhttp_tls_secrets() { printf '%s\n' path; }
 
 xhttp_tls_init() {
     local port path

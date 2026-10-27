@@ -7,12 +7,14 @@ xray_test_dir() {
     XRAY_LOCATION_ASSET="$(dirname "${EZ_XRAY_BIN}")" "${EZ_XRAY_BIN}" run -test -confdir "$1" 2>&1
 }
 
-# 保存当前生效的状态和配置，返回快照目录
+# 保存当前生效的状态和配置，返回快照目录。
+# apply_change 在调用 ez_apply 之前已经改了状态文件，这时用 EZ_PREV_STATE 指向修改前的状态，
+# 保证快照里的状态和配置是同一时刻的，回滚后两者一致
 snapshot_save() {
-    local dir
+    local dir state=${EZ_PREV_STATE:-${EZ_STATE}}
     dir="${EZ_SNAPSHOTS}/$(date +%Y%m%d-%H%M%S)-$$"
     mkdir -p "${dir}"
-    [[ -f "${EZ_STATE}" ]] && cp -p "${EZ_STATE}" "${dir}/state.json"
+    [[ -f "${state}" ]] && cp -p "${state}" "${dir}/state.json"
     [[ -d "${EZ_XRAY_CONF}" ]] && cp -rp "${EZ_XRAY_CONF}" "${dir}/xray"
     [[ -d "${EZ_SUB}" ]] && cp -rp "${EZ_SUB}" "${dir}/subscribe"
     [[ -f "${EZ_NGINX_CONF}" ]] && cp -p "${EZ_NGINX_CONF}" "${dir}/nginx.conf"
@@ -128,7 +130,7 @@ apply_change() {
     local backup
     backup=$(mktemp "${EZ_STATE}.bak.XXXXXX")
     cp -p "${EZ_STATE}" "${backup}"
-    if ("$@") && ez_apply; then
+    if ("$@") && EZ_PREV_STATE=${backup} ez_apply; then
         rm -f "${backup}"
         return 0
     fi

@@ -4,7 +4,7 @@
 set -o pipefail
 
 EZ_HOME=${EZ_HOME:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)}
-for f in common port protocol render users routing warp nginx system apply doctor update ui; do
+for f in common port protocol render users routing warp nginx system apply doctor update geo backup ui; do
     # shellcheck source=/dev/null
     source "${EZ_HOME}/lib/${f}.sh"
 done
@@ -17,15 +17,19 @@ easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
 
   install --domain 域名 [--full] [--protocols a,b] [--port-range 8000-8100] [--email 邮箱]
                                   首次安装。默认推荐安装（Reality-Vision + Hysteria2），--full 安装全部 5 个协议
+  install --restore 备份文件      在新服务器上从备份恢复，沿用原来的用户、密钥和端口
   protocol list | enable 名称 [--port 端口] | disable 名称
   user list | add [邮箱] | del 邮箱  不填邮箱时生成 随机前缀@xray.fake
   sub [邮箱]                      显示订阅地址和分享链接
-  route list | add 出口 规则 | del 出口 [规则] | quic block|allow
+  route list | add 出口 规则 | del 出口 [规则] | quic block|allow | bt block|allow
                                   出口：direct、block、warp-ipv4；规则用逗号分隔，例如 anthropic,example.com,geoip:cn
                                   不带前缀的名称会去 geosite 列表里查（anthropic = geosite:anthropic）
   warp setup | remove             注册或删除 WARP 出口
   xray version | use [版本]       查看或切换 Xray 版本（不填为推荐版本）
   update [版本]                   更新 easyxray 到最新发布版本（或指定版本），会校验 SHA256
+  geo update | auto on|off        更新 geoip/geosite 数据 / 开关每周自动更新
+  rekey [协议]                    重新生成密钥（不填为全部协议），客户端更新订阅后使用新密钥
+  backup [文件]                   备份用户、密钥和设置（默认保存到 /root）
   log debug [分钟] | normal | show 临时打开调试日志（默认 30 分钟后自动恢复）
   apply | rollback | doctor       重新生成配置 / 恢复上一份配置 / 诊断
   uninstall [--keep-config | --purge]
@@ -69,7 +73,7 @@ link_commands() {
 }
 
 cmd_install() {
-    local domain='' full='' protocols='' range='' email='' p
+    local domain='' full='' protocols='' range='' email='' restore='' p
     while (($#)); do
         case "$1" in
         --domain) domain=$2; shift ;;
@@ -77,6 +81,7 @@ cmd_install() {
         --protocols) protocols=$2; shift ;;
         --port-range) range=$2; shift ;;
         --email) email=$2; shift ;;
+        --restore) restore=$2; shift ;;
         --agree-tos) ;; # 兼容旧参数：安装时自动同意
         *) die "未知参数：$1" ;;
         esac
@@ -86,6 +91,8 @@ cmd_install() {
     if state_exists && [[ "$(state_get '.system.installed')" == "true" ]]; then
         die "已经安装过了（${EZ_STATE}）。修改设置请用其他命令，重新安装请先 uninstall"
     fi
+    # 从备份恢复：先把备份里的配置放好，后面按「沿用已有配置」安装
+    [[ -n "${restore}" ]] && restore_state "${restore}"
     # 保留配置卸载后重新安装时，域名可以不填
     [[ -z "${domain}" ]] && state_exists && domain=$(state_get .domain)
     [[ "${domain}" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "请用 --domain 指定域名，例如 --domain box.example.com"
@@ -138,6 +145,7 @@ cmd_install() {
         email=$(jq -r '.users[0].email' "${EZ_STATE}")
     fi
     link_commands
+    [[ "$(jq -r '.system.geoAutoUpdate != false' "${EZ_STATE}")" == "true" ]] && geo_auto_on
     ez_apply || die "安装没有完成，请根据上面的提示处理后重新运行同样的安装命令"
     state_update '.system.installed = true'
 
@@ -254,7 +262,14 @@ cmd_route() {
         *) die "用法：easyxray route quic block|allow" ;;
         esac
         ;;
-    *) die "用法：easyxray route list | add 出口 规则 | del 出口 [规则] | quic block|allow" ;;
+    bt)
+        case "${2:-}" in
+        block) apply_change state_update '.routing.blockBT = true' && ok "已开启 BT 屏蔽" ;;
+        allow) apply_change state_update '.routing.blockBT = false' && ok "已关闭 BT 屏蔽" ;;
+        *) die "用法：easyxray route bt block|allow" ;;
+        esac
+        ;;
+    *) die "用法：easyxray route list | add 出口 规则 | del 出口 [规则] | quic block|allow | bt block|allow" ;;
     esac
 }
 
@@ -295,6 +310,43 @@ cmd_xray() {
     esac
 }
 
+# ---------- geo 数据 ----------
+
+cmd_geo() {
+    need_installed
+    case "${1:-update}" in
+    update) geo_update ;;
+    auto)
+        case "${2:-}" in
+        on) geo_auto_on && state_update '.system.geoAutoUpdate = true' && ok "已开启每周自动更新 geo 数据" ;;
+        off) geo_auto_off && state_update '.system.geoAutoUpdate = false' && ok "已关闭 geo 数据自动更新" ;;
+        *) die "用法：easyxray geo auto on|off" ;;
+        esac
+        ;;
+    *) die "用法：easyxray geo update | auto on|off" ;;
+    esac
+}
+
+# ---------- 重新生成密钥 ----------
+
+rekey_state() {
+    local p
+    for p in "$@"; do proto_rekey_state "${p}"; done
+}
+
+cmd_rekey() {
+    need_installed
+    local list=()
+    if [[ -z "${1:-}" || "$1" == "all" ]]; then
+        list=("${EZ_PROTOCOLS[@]}")
+    else
+        valid_protocol "$1"
+        list=("$1")
+    fi
+    apply_change rekey_state "${list[@]}" || return 1
+    ok "已重新生成密钥，旧的分享链接已经失效。请在客户端中更新订阅"
+}
+
 # ---------- 日志 ----------
 
 cmd_log() {
@@ -327,6 +379,7 @@ remove_system_files() {
     rm -f "${EZ_NGINX_CONF}" /etc/logrotate.d/easyxray /etc/letsencrypt/renewal-hooks/deploy/easyxray.sh
     nginx -t >/dev/null 2>&1 && systemctl reload nginx
     remove_firewall_rules
+    geo_auto_off
 }
 
 # 两种卸载：
@@ -404,6 +457,10 @@ menu_install() {
     fi
     ui_menu 2 "完全安装" "" ""
     ui_row "   ${C_DIM}全部 5 个协议${C_RESET}"
+    if [[ -z "${kept}" ]]; then
+        ui_menu 3 "从备份恢复" "" ""
+        ui_row "   ${C_DIM}沿用备份里的用户、密钥和端口，客户端不用重新导入${C_RESET}"
+    fi
     ui_menu 0 "退出" "" ""
     ui_bottom
     local choice domain email
@@ -421,6 +478,13 @@ menu_install() {
         else
             (cmd_install --domain "${domain}" ${email:+--email "${email}"})
         fi
+        ui_pause
+        ;;
+    3)
+        [[ -z "${kept}" ]] || return 1
+        local file
+        file=$(ui_ask "备份文件路径（例如 /root/easyxray-backup-20261027-120000.tar.gz）：")
+        [[ -n "${file}" ]] && (cmd_install --restore "${file}")
         ui_pause
         ;;
     *) return 1 ;;
@@ -497,11 +561,19 @@ menu_protocols() {
         fi
         i=$((i + 1))
     done
+    ui_row "${C_CYAN}6${C_RESET}  重新生成所有协议的密钥"
     ui_row "${C_CYAN}0${C_RESET}  返回"
     ui_rule
-    ui_row "${C_DIM}选择编号切换开启/关闭；Reality-Vision 不能关闭${C_RESET}"
+    ui_row "${C_DIM}选择 1-5 切换开启/关闭；Reality-Vision 不能关闭${C_RESET}"
+    ui_row "${C_DIM}怀疑分享链接泄露时可以重新生成密钥，客户端更新订阅即可${C_RESET}"
     ui_bottom
-    idx=$(pick_one "请选择：" "${#EZ_PROTOCOLS[@]}") || return 0
+    idx=$(pick_one "请选择：" 6) || return 0
+    if ((idx == 5)); then
+        confirm "重新生成后旧的分享链接全部失效，所有客户端都要更新订阅，确认" || return 0
+        (cmd_rekey)
+        ui_pause
+        return 0
+    fi
     p=${EZ_PROTOCOLS[$idx]}
     if protocol_enabled "${p}"; then (cmd_protocol disable "${p}"); else (cmd_protocol enable "${p}"); fi
     ui_pause
@@ -575,13 +647,14 @@ menu_other_rules() {
 }
 
 menu_routing() {
-    local warp quic warp_rules=() i choice
+    local warp quic bt warp_rules=() i choice
     if [[ -n "$(state_get '.outbounds["warp-ipv4"].privateKey')" ]]; then warp=on; else warp=off; fi
     [[ "$(state_get '.routing.blockQUIC')" == "true" ]] && quic=on || quic=off
+    bt_blocked && bt=on || bt=off
     mapfile -t warp_rules < <(rules_of warp-ipv4)
     printf '\n'
     ui_top
-    ui_title "分流管理"
+    ui_title "分流与屏蔽管理"
     ui_rule
     ui_row "$(ui_status_dot "${warp}") WARP $([[ "${warp}" == on ]] && echo 已开启 || echo 未开启)"
     if [[ "${warp}" == on ]]; then
@@ -598,7 +671,8 @@ menu_routing() {
         ui_menu 1 "开启 WARP" 2 "添加 WARP 规则"
     fi
     ui_menu 3 "删除 WARP 规则" 4 "直连 / 屏蔽规则"
-    ui_menu 5 "QUIC 屏蔽：$([[ "${quic}" == on ]] && echo 开 || echo 关)" 0 "返回"
+    ui_menu 5 "QUIC 屏蔽：$([[ "${quic}" == on ]] && echo 开 || echo 关)" 6 "BT 屏蔽：$([[ "${bt}" == on ]] && echo 开 || echo 关)"
+    ui_menu 0 "返回" "" ""
     [[ "${warp}" == off ]] && ui_row "${C_DIM}开启 WARP 时默认分流 ${EZ_WARP_DEFAULT_RULES//,/、}${C_RESET}"
     ui_row "${C_DIM}QUIC 屏蔽一般不需要开启，只在 QUIC 请求没有按规则分流时使用${C_RESET}"
     ui_bottom
@@ -623,6 +697,7 @@ menu_routing() {
     3) delete_rules_of warp-ipv4 || { ui_pause; return 0; } ;;
     4) menu_other_rules; return 0 ;;
     5) if [[ "${quic}" == on ]]; then (cmd_route quic allow); else (cmd_route quic block); fi ;;
+    6) if [[ "${bt}" == on ]]; then (cmd_route bt allow); else (cmd_route bt block); fi ;;
     *) return 0 ;;
     esac
     ui_pause
@@ -637,9 +712,11 @@ menu_versions() {
     ui_rule
     ui_row "easyxray  当前 ${EZ_VERSION}    最新 ${latest:-${C_DIM}获取失败${C_RESET}}"
     ui_row "Xray      当前 $(xray_installed_version)    推荐 ${EZ_XRAY_RECOMMENDED}"
+    ui_row "geo 数据  $(geo_date)    每周自动更新：$(geo_auto_enabled && echo 开 || echo 关)"
     ui_rule
     ui_menu 1 "更新 easyxray" 2 "Xray 切换到推荐版本"
-    ui_menu 3 "Xray 指定其他版本" 0 "返回"
+    ui_menu 3 "Xray 指定其他版本" 4 "更新 geo 数据"
+    ui_menu 5 "geo 自动更新：$(geo_auto_enabled && echo 开 || echo 关)" 0 "返回"
     ui_bottom
     case "$(ui_ask "请选择：")" in
     1)
@@ -654,6 +731,27 @@ menu_versions() {
         [[ -n "${v}" ]] || return 0
         (cmd_xray use "${v}")
         ;;
+    4) (cmd_geo update) ;;
+    5) if geo_auto_enabled; then (cmd_geo auto off); else (cmd_geo auto on); fi ;;
+    *) return 0 ;;
+    esac
+    ui_pause
+}
+
+menu_backup() {
+    printf '\n'
+    ui_top
+    ui_title "备份与回滚"
+    ui_rule
+    ui_menu 1 "恢复上一份配置" 2 "导出备份"
+    ui_menu 0 "返回" "" ""
+    ui_rule
+    ui_row "${C_DIM}恢复上一份配置：撤销最近一次修改，最多可以连续撤销 5 次${C_RESET}"
+    ui_row "${C_DIM}导出备份：换服务器时在新服务器上恢复，客户端不用重新导入${C_RESET}"
+    ui_bottom
+    case "$(ui_ask "请选择：")" in
+    1) (ez_rollback) ;;
+    2) (ez_backup) ;;
     *) return 0 ;;
     esac
     ui_pause
@@ -670,9 +768,9 @@ menu() {
         ui_dashboard
         ui_rule
         ui_menu 1 "查看订阅" 2 "用户管理"
-        ui_menu 3 "协议管理" 4 "分流管理"
+        ui_menu 3 "协议管理" 4 "分流与屏蔽管理"
         ui_menu 5 "诊断" 6 "版本更新"
-        ui_menu 7 "调试日志" 8 "恢复上一份配置"
+        ui_menu 7 "调试日志" 8 "备份与回滚"
         ui_menu 9 "卸载" 0 "退出"
         ui_bottom
         choice=$(ui_ask "请选择：")
@@ -684,7 +782,7 @@ menu() {
         5) printf '\n'; (ez_doctor); ui_pause ;;
         6) menu_versions ;;
         7) (cmd_log debug "$(ui_ask "打开多少分钟（直接回车 30）：")"); ui_pause ;;
-        8) (ez_rollback); ui_pause ;;
+        8) menu_backup ;;
         9) (cmd_uninstall) && return 0 ;;
         0 | '') return 0 ;;
         esac
@@ -710,6 +808,9 @@ main() {
     xray) cmd_xray "$@" ;;
     log) cmd_log "$@" ;;
     update) ez_update "$@" ;;
+    geo) cmd_geo "$@" ;;
+    rekey) cmd_rekey "$@" ;;
+    backup) need_installed; ez_backup "$@" ;;
     apply) require_root; need_installed; ez_apply && ok "配置已更新" ;;
     rollback) require_root; need_installed; ez_rollback ;;
     doctor) need_installed; ez_doctor ;;

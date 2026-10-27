@@ -28,6 +28,7 @@ xray_ok() { XRAY_LOCATION_ASSET=$(dirname "${XRAY}") "${XRAY}" run -test -confdi
 mkdir -p "${R}/etc/easyxray/tls"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 30 -subj "/CN=test.example.com" \
     -keyout "${R}/etc/easyxray/tls/test.example.com.key" -out "${R}/etc/easyxray/tls/test.example.com.crt" 2>/dev/null
+cp "${R}/etc/easyxray/tls/test.example.com.crt" "${R}/cert.crt" && cp "${R}/etc/easyxray/tls/test.example.com.key" "${R}/cert.key"
 
 echo "安装"
 x install --domain test.example.com --full >/dev/null 2>&1
@@ -77,7 +78,7 @@ check "被拒绝时规则不变" bash -c "! grep -q notexist123 ${R}/etc/easyxra
 x route del direct "anthropic,openai" >/dev/null 2>&1
 check "用名称删除 geosite 规则" bash -c "! grep -q 'geosite:anthropic' ${R}/etc/easyxray/state.json"
 x route quic block >/dev/null 2>&1
-check "QUIC 屏蔽排在第一条" cfg '.routing.rules[0] == {type: "field", network: "udp", port: "443", outboundTag: "block"}'
+check "QUIC 屏蔽排在分流规则之前" cfg '[.routing.rules[0:2][] | select(.network == "udp")] | length == 1'
 x route quic allow >/dev/null 2>&1
 x route del direct "1.2.3.0/24,geoip:cn" >/dev/null 2>&1
 check "删掉 IP 规则后回到 AsIs" cfg '.routing.domainStrategy == "AsIs"'
@@ -103,6 +104,7 @@ cp "${R}/state.ok" "${R}/etc/easyxray/state.json"
 x protocol disable hysteria2 >/dev/null 2>&1
 x rollback >/dev/null 2>&1
 check "rollback 恢复到关闭 Hysteria2 之前" cfg '[.inbounds[].tag] | index("hysteria2")'
+check "rollback 后状态文件和配置一致" jq -e '.protocols.hysteria2.enabled == true' "${R}/etc/easyxray/state.json"
 
 echo "更新"
 # 在程序目录的副本上测试，用本地目录代替 Release 下载地址；发布包里的版本号改成 9.9.9 以便确认已替换
@@ -125,6 +127,44 @@ check "更新保留 bin/ 里的 Xray" test -f "${P}/bin/marker"
 check "更新删除 git clone 留下的 .git" test ! -e "${P}/.git"
 check "更新后配置仍然有效" xray_ok
 
+echo "BT 屏蔽"
+check "默认开启 BT 屏蔽，规则在最前面" cfg '.routing.rules[0] == {type: "field", protocol: ["bittorrent"], outboundTag: "block"}'
+x route bt allow >/dev/null 2>&1
+check "关闭后没有 BT 规则" cfg '[.routing.rules[] | select(.protocol)] | length == 0'
+jq 'del(.routing.blockBT)' "${R}/etc/easyxray/state.json" >"${R}/s.tmp" && cat "${R}/s.tmp" >"${R}/etc/easyxray/state.json"
+x apply >/dev/null 2>&1
+check "旧版本状态文件没有这一项时默认开启" cfg '.routing.rules[0].protocol == ["bittorrent"]'
+
+echo "重新生成密钥"
+S="${R}/etc/easyxray/state.json"
+jq -S '{users, ports: [.protocols[] | .port], vision: .protocols["reality-vision"], rx: .protocols["reality-xhttp"], hy: .protocols.hysteria2.obfsPassword, xp: .protocols["xhttp-tls"].path}' "${S}" >"${R}/rk.before"
+x rekey >/dev/null 2>&1
+rk() { jq -e --slurpfile b "${R}/rk.before" "$1" "${S}"; }
+check "Reality-Vision 密钥和 shortId 已更换" rk '.protocols["reality-vision"] as $n | $b[0].vision as $o | $n.privateKey != $o.privateKey and $n.publicKey != $o.publicKey and $n.shortId != $o.shortId and ($n.privateKey | length) > 0'
+check "Reality-XHTTP 密钥和路径已更换" rk '.protocols["reality-xhttp"] as $n | $b[0].rx as $o | $n.privateKey != $o.privateKey and $n.path != $o.path'
+check "Hysteria2 混淆密码和 XHTTP-TLS 路径已更换" rk '(.protocols.hysteria2.obfsPassword != $b[0].hy) and (.protocols["xhttp-tls"].path != $b[0].xp)'
+check "端口和用户不变" rk '([.protocols[] | .port] == $b[0].ports) and (.users == $b[0].users)'
+check "重新生成后配置有效" xray_ok
+
+echo "geo 数据"
+G="${R}/geo-src" B="${R}/xbin"
+mkdir -p "${G}/geoip" "${G}/geosite" "${B}"
+cp "${XRAY}" "${B}/xray"
+cp "$(dirname "${XRAY}")/geoip.dat" "$(dirname "${XRAY}")/geosite.dat" "${B}/"
+cp "$(dirname "${XRAY}")/geoip.dat" "${G}/geoip/geoip-lite.dat"
+cp "$(dirname "${XRAY}")/geosite.dat" "${G}/geosite/geosite.dat"
+printf 'padding' >>"${G}/geosite/geosite.dat"
+for f in geoip/geoip-lite.dat geosite/geosite.dat; do (cd "${G}/$(dirname "${f}")" && shasum -a 256 "$(basename "${f}")" >"$(basename "${f}").sha256sum"); done
+geo() { EZ_XRAY_BIN="${B}/xray" EZ_GEO_BASE="file://${G}" bash "${HERE}/easyxray" geo update; }
+cp "${G}/geosite/geosite.dat.sha256sum" "${R}/good.sum"
+echo "0000  geosite.dat" >"${G}/geosite/geosite.dat.sha256sum"
+check "校验不通过时拒绝更新" bash -c "! EZ_XRAY_BIN=${B}/xray EZ_GEO_BASE=file://${G} bash ${HERE}/easyxray geo update"
+check "拒绝更新后数据不变" cmp -s "${B}/geosite.dat" "$(dirname "${XRAY}")/geosite.dat"
+cp "${R}/good.sum" "${G}/geosite/geosite.dat.sha256sum"
+geo >/dev/null 2>&1
+check "校验通过后替换为新数据" cmp -s "${B}/geosite.dat" "${G}/geosite/geosite.dat"
+check "数据相同时提示已经是最新" bash -c "EZ_XRAY_BIN=${B}/xray EZ_GEO_BASE=file://${G} bash ${HERE}/easyxray geo update 2>&1 | grep -q 已经是最新"
+
 echo "卸载"
 S="${R}/etc/easyxray/state.json"
 jq -S '{users, protocols}' "${S}" >"${R}/keys.before"
@@ -140,6 +180,23 @@ check "重新安装后配置有效" xray_ok
 echo y | x uninstall --purge >/dev/null 2>&1
 check "完全卸载删除 /etc/easyxray" test ! -e "${R}/etc/easyxray"
 check "测试模式下完全卸载不删除源码目录" test -f "${HERE}/easyxray"
+
+echo "备份与恢复"
+mkdir -p "${R}/etc/easyxray/tls"
+cp "${R}/cert.crt" "${R}/etc/easyxray/tls/test.example.com.crt" && cp "${R}/cert.key" "${R}/etc/easyxray/tls/test.example.com.key"
+x install --domain test.example.com --full >/dev/null 2>&1
+x user add bob@example.com >/dev/null 2>&1
+jq -S '{users, protocols, routing}' "${S}" >"${R}/bk.before"
+x backup "${R}/bk.tar.gz" >/dev/null 2>&1
+check "备份文件权限是 600" bash -c "[[ \$(stat -f %Lp ${R}/bk.tar.gz 2>/dev/null || stat -c %a ${R}/bk.tar.gz) == 600 ]]"
+check "已安装时拒绝恢复" bash -c "! bash ${HERE}/easyxray install --restore ${R}/bk.tar.gz"
+echo y | x uninstall --purge >/dev/null 2>&1
+mkdir -p "${R}/etc/easyxray/tls"
+cp "${R}/cert.crt" "${R}/etc/easyxray/tls/test.example.com.crt" && cp "${R}/cert.key" "${R}/etc/easyxray/tls/test.example.com.key"
+x install --restore "${R}/bk.tar.gz" >/dev/null 2>&1
+jq -S '{users, protocols, routing}' "${S}" >"${R}/bk.after"
+check "恢复后用户、密钥、端口和规则与备份时一致" cmp -s "${R}/bk.before" "${R}/bk.after"
+check "恢复后标记为已安装、配置有效" bash -c "jq -e '.system.installed == true' ${S} >/dev/null && XRAY_LOCATION_ASSET=$(dirname "${XRAY}") ${XRAY} run -test -confdir ${R}/etc/easyxray/xray >/dev/null"
 
 printf '\n通过 %d，失败 %d\n' "${pass}" "${fail}"
 ((fail == 0))

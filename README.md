@@ -14,7 +14,7 @@
 
 ---
 
-easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命令完成证书申请、Xray 安装、伪装站点、防火墙和 BBR，之后通过中文菜单或命令管理用户、协议、订阅和 WARP 分流。
+easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命令完成证书申请、Xray 安装、伪装站点、防火墙和 BBR，之后通过中文菜单或命令管理用户、协议、订阅、WARP 分流和屏蔽规则，并支持备份迁移到新服务器。
 
 ## 目录
 
@@ -25,6 +25,7 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
   - [交互式安装](#交互式安装)
   - [非交互式安装](#非交互式安装)
   - [手动安装](#手动安装)
+  - [从备份恢复](#从备份恢复)
 - [客户端设置](#客户端设置)
   - [推荐客户端](#推荐客户端)
 - [菜单使用说明](#菜单使用说明)
@@ -39,12 +40,15 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 ## 特点
 
 - **修改安全**：所有修改先经过 `xray run -test` 和 `nginx -t` 校验，通过后才替换；替换后服务启动失败或端口没有监听，自动恢复到上一份配置。保留最近 5 份快照，可以随时回滚。
-- **安装安全**：不运行第三方安装脚本或二进制。easyxray 自身从本仓库的 GitHub Release 下载并校验 SHA256；证书使用系统软件源中的 `certbot`；Xray 从官方 GitHub Release 下载，并用官方 `.dgst` 文件校验 SHA256；WARP 直接调用 Cloudflare 的注册接口。
+- **安装与更新安全**：不运行第三方安装脚本或二进制。easyxray 自身从本仓库的 GitHub Release 下载并校验 SHA256；证书使用系统软件源中的 `certbot`；Xray 从官方 GitHub Release 下载，并用官方 `.dgst` 文件校验 SHA256；geo 数据与 Xray 官方发布包同源，校验 SHA256 并确认当前规则可用后才替换；WARP 直接调用 Cloudflare 的注册接口。
 - **运行安全**：Xray 以专用的 `easyxray` 用户运行，只授予监听低端口和创建 WARP 网卡两项权限。状态文件和证书私钥只有 root 和服务用户可读。
+- **防主动探测**：所有 TCP 端口对外都表现为同一个 Nginx 网站，使用同一张证书，同样支持 HTTP/2。Reality 未通过认证的连接转给本机 Nginx；XHTTP-TLS 由 Nginx 处理 TLS 后转发给 Xray；VLESS-TLS-Vision 按协商结果回落到 Nginx。
 - **少暴露端口**：推荐安装只启用两个协议。除 Reality-Vision 固定使用 443 外，其他协议的端口在指定范围内随机选择。
-- **独立的密钥**：Reality 密钥、shortId、XHTTP 路径和 Hysteria2 混淆密码都在安装时随机生成。
+- **独立的密钥**：Reality 密钥、shortId、XHTTP 路径和 Hysteria2 混淆密码都在安装时随机生成，怀疑泄露时可以随时重新生成。
 - **多用户**：用户以邮箱区分，每个用户有独立的订阅地址。
-- **WARP 分流**：一键开启 WARP，默认将 `geosite:cn`、`geoip:cn` 分流到 WARP。添加规则时直接写 `anthropic`、`openai` 等名称即可，会自动在 geosite 列表中查找。
+- **WARP 分流**：一键开启 WARP，默认将 `geosite:cn`、`geoip:cn` 分流到 WARP。添加规则时直接写 `anthropic`、`openai` 等名称即可，会自动在 geosite 列表中查找。geo 数据每周自动更新。
+- **屏蔽 BT**：默认屏蔽 BT 下载，避免 VPS 收到版权投诉。
+- **备份与迁移**：一条命令导出备份，在新服务器上恢复后沿用原来的用户和密钥，客户端不用重新导入。
 - **中文菜单**：所有操作都用数字选择，删除前需要确认。
 
 ## 支持的协议
@@ -127,7 +131,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 ╭────────────────────────────────────────────────────────
 │
 │   ┌─┐┌─┐┌─┐┬ ┬─┐ ┬┬─┐┌─┐┬ ┬
-│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.3.0
+│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.4.0
 │   └─┘┴ ┴└─┘ ┴ ┴ └─┴└─┴ ┴ ┴
 │   简单、安全的 Xray 服务器管理工具
 │   改动前自动校验 · 失败自动回滚 · 一个文件管理全部配置
@@ -168,6 +172,7 @@ curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh |
 | `--port-range 起-止` | 随机端口的范围，默认 `8000-8100` |
 | `--email 邮箱` | 第一个用户的邮箱，不填时自动生成 `随机前缀@xray.fake` |
 | `--version 版本` | 安装指定版本，例如 `--version v0.2.0`，不填时安装最新版本 |
+| `--restore 备份文件` | 从备份恢复，见[从备份恢复](#从备份恢复) |
 
 已经安装时带参数运行只会提示已安装，不会重复安装。
 
@@ -184,6 +189,18 @@ curl -fLO https://github.com/driftray/easyxray/releases/latest/download/easyxray
 sha256sum -c easyxray.tar.gz.sha256 && tar -xzf easyxray.tar.gz && rm -f easyxray.tar.gz*
 /opt/easyxray/easyxray
 ```
+
+### 从备份恢复
+
+换服务器时，先在旧服务器上导出备份（菜单「8 备份与回滚 → 2 导出备份」，或 `ezx backup`），把备份文件复制到新服务器，再把域名解析到新服务器的 IP，然后运行：
+
+```bash
+bash install.sh --restore /root/easyxray-backup-20261027-120000.tar.gz
+```
+
+也可以不带参数运行 `bash install.sh`，在安装菜单中选择「3 从备份恢复」。恢复后沿用原来的用户、密钥、端口和分流规则，证书在新服务器上重新申请，客户端不需要重新导入订阅。
+
+备份文件包含全部用户和密钥，请妥善保管。
 
 ## 客户端设置
 
@@ -212,7 +229,7 @@ sudo ezx sub
 ╭────────────────────────────────────────────────────────
 │
 │   ┌─┐┌─┐┌─┐┬ ┬─┐ ┬┬─┐┌─┐┬ ┬
-│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.3.0
+│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.4.0
 │   └─┘┴ ┴└─┘ ┴ ┴ └─┴└─┴ ┴ ┴
 │   简单、安全的 Xray 服务器管理工具
 │   改动前自动校验 · 失败自动回滚 · 一个文件管理全部配置
@@ -228,9 +245,9 @@ sudo ezx sub
 │ ○ VLESS-TLS-Vision    未开启
 ├────────────────────────────────────────────────────────
 │ 1  查看订阅            2  用户管理
-│ 3  协议管理            4  分流管理
+│ 3  协议管理            4  分流与屏蔽管理
 │ 5  诊断                6  版本更新
-│ 7  调试日志            8  恢复上一份配置
+│ 7  调试日志            8  备份与回滚
 │ 9  卸载                0  退出
 ╰────────────────────────────────────────────────────────
 ```
@@ -269,19 +286,21 @@ sudo ezx sub
 │ 3  ○ XHTTP-TLS           未开启
 │ 4  ○ Reality-XHTTP       未开启
 │ 5  ○ VLESS-TLS-Vision    未开启
+│ 6  重新生成所有协议的密钥
 │ 0  返回
 ```
 
-输入编号开启或关闭对应协议。
+输入 1-5 开启或关闭对应协议，输入 6 重新生成密钥。
 
 - 首次开启时自动分配端口并生成密钥；关闭后再开启，沿用原来的端口和密钥。
 - Reality-Vision 不能关闭。
 - 开启新协议后，在云服务商的安全组中放行它的端口，然后在客户端中更新订阅。
+- 重新生成密钥会更换 Reality 密钥和 shortId、XHTTP 路径、Hysteria2 混淆密码，旧的分享链接全部失效。端口、用户和订阅地址不变，客户端更新订阅即可。怀疑分享链接泄露时使用。
 
-### 4. 分流管理
+### 4. 分流与屏蔽管理
 
 ```
-│ 分流管理
+│ 分流与屏蔽管理
 ├────────────────────────────────────────────────────────
 │ ● WARP 已开启
 │    1  geosite:anthropic
@@ -290,7 +309,8 @@ sudo ezx sub
 ├────────────────────────────────────────────────────────
 │ 1  关闭 WARP           2  添加 WARP 规则
 │ 3  删除 WARP 规则      4  直连 / 屏蔽规则
-│ 5  QUIC 屏蔽：关       0  返回
+│ 5  QUIC 屏蔽：关       6  BT 屏蔽：开
+│ 0  返回
 ```
 
 | 选项 | 说明 |
@@ -300,6 +320,7 @@ sudo ezx sub
 | 3 删除 WARP 规则 | 输入列表中的编号，可以一次删除多条，例如 `1,3` |
 | 4 直连 / 屏蔽规则 | 添加或删除走直连、或直接屏蔽的规则，写法相同 |
 | 5 QUIC 屏蔽 | 屏蔽 UDP 443，让浏览器改用 TCP 访问网站 |
+| 6 BT 屏蔽 | 默认开启，屏蔽 BT 下载。只能识别未加密的 BT 流量 |
 
 规则写法：
 
@@ -323,13 +344,15 @@ sudo ezx sub
 
 ### 6. 版本更新
 
-显示 easyxray 的当前版本和最新发布版本，以及 Xray 的当前版本和推荐版本。
+显示 easyxray、Xray 和 geo 数据的版本。
 
 | 选项 | 说明 |
 |---|---|
 | 1 更新 easyxray | 更新到最新发布版本，见[更新](#更新) |
 | 2 Xray 切换到推荐版本 | 当前推荐 v26.10.21 |
 | 3 Xray 指定其他版本 | 输入版本号，例如 `v26.10.21` |
+| 4 更新 geo 数据 | 从 [XTLS/Xray-rules-dat](https://github.com/XTLS/Xray-rules-dat)（与 Xray 官方发布包相同的来源）下载 geoip / geosite 数据，校验 SHA256 并确认当前规则可用后替换 |
+| 5 geo 自动更新 | 默认开启，每周日凌晨自动更新一次 |
 
 切换 Xray 前备份当前的 Xray；新版本无法加载当前配置时，自动换回原来的版本。
 
@@ -341,9 +364,12 @@ sudo ezx sub
 tail -f /etc/easyxray/log/error.log /etc/easyxray/log/access.log
 ```
 
-### 8. 恢复上一份配置
+### 8. 备份与回滚
 
-将状态文件和全部配置恢复到上一次修改之前。最多保留 5 份快照，可以连续恢复。
+| 选项 | 说明 |
+|---|---|
+| 1 恢复上一份配置 | 将状态文件和全部配置恢复到上一次修改之前。最多保留 5 份快照，可以连续恢复 |
+| 2 导出备份 | 保存到 `/root/easyxray-backup-日期.tar.gz`，用于[从备份恢复](#从备份恢复) |
 
 ### 9. 卸载
 
@@ -387,11 +413,16 @@ ezx route del warp-ipv4 openai        # 删除指定规则
 ezx route del warp-ipv4               # 删除该出口的全部规则
 ezx route quic block                  # 开启 QUIC 屏蔽
 ezx route quic allow                  # 关闭 QUIC 屏蔽
+ezx route bt allow                    # 关闭 BT 屏蔽（block 为开启）
 
 # 维护
 ezx doctor                            # 诊断
 ezx apply                             # 根据状态文件重新生成配置
 ezx rollback                          # 恢复上一份配置
+ezx backup                            # 导出备份
+ezx rekey                             # 重新生成所有协议的密钥
+ezx geo update                        # 更新 geo 数据
+ezx geo auto off                      # 关闭 geo 数据自动更新（on 为开启）
 ezx update                            # 更新 easyxray 到最新发布版本
 ezx update v0.2.0                     # 更新或换回指定版本
 ezx xray version
@@ -425,7 +456,7 @@ ezx uninstall --purge                 # 完全卸载
 
 | 路径 | 内容 |
 |---|---|
-| `/opt/easyxray/` | easyxray 和 Xray 程序 |
+| `/opt/easyxray/` | easyxray 和 Xray 程序，geo 数据在 `bin/` 下 |
 | `/etc/easyxray/state.json` | 状态文件 |
 | `/etc/easyxray/xray/` | 生成的 Xray 配置 |
 | `/etc/easyxray/tls/` | 证书，续期后自动更新 |
@@ -435,6 +466,8 @@ ezx uninstall --purge                 # 完全卸载
 | `/etc/easyxray/snapshots/` | 最近 5 份配置快照 |
 | `/etc/nginx/conf.d/easyxray.conf` | 生成的 Nginx 配置 |
 | `/etc/systemd/system/easyxray.service` | Xray 服务 |
+| `/etc/systemd/system/easyxray-geo.timer` | geo 数据每周自动更新 |
+| `/root/easyxray-backup-*.tar.gz` | 导出的备份文件 |
 
 ## 常见问题
 

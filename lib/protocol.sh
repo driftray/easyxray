@@ -93,3 +93,16 @@ load_protocols() {
         source "${f}"
     done
 }
+
+# 重新生成协议的密钥：删除 <协议>_secrets 列出的字段，再由 init 重新生成。端口、用户和订阅地址不变
+proto_rekey_state() {
+    local p=$1 fn f
+    fn=$(proto_fn "${p}" secrets)
+    declare -F "${fn}" >/dev/null || return 0
+    # 从没开启过的协议没有密钥，不用处理
+    [[ -n "$(proto_get "${p}" .port)" ]] || return 0
+    for f in $("${fn}"); do
+        state_update 'del(.protocols[$p][$f])' --arg p "${p}" --arg f "${f}"
+    done
+    proto_call "${p}" init
+}

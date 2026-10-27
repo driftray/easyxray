@@ -4,6 +4,7 @@
 
 reality_xhttp_title() { printf 'Reality-XHTTP'; }
 reality_xhttp_transport() { printf 'tcp'; }
+reality_xhttp_secrets() { printf '%s\n' privateKey publicKey shortId path; }
 
 reality_xhttp_init() {
     local port keys path

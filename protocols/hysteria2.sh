@@ -4,6 +4,7 @@
 
 hysteria2_title() { printf 'Hysteria2'; }
 hysteria2_transport() { printf 'udp'; }
+hysteria2_secrets() { printf '%s\n' obfsPassword; }
 
 hysteria2_init() {
     local port

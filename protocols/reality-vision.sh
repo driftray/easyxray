@@ -3,6 +3,7 @@
 
 reality_vision_title() { printf 'Reality-Vision'; }
 reality_vision_transport() { printf 'tcp'; }
+reality_vision_secrets() { printf '%s\n' privateKey publicKey shortId; }
 
 reality_vision_init() {
     local keys

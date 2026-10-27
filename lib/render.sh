@@ -31,6 +31,8 @@ routing_json() {
         {
             domainStrategy: (if any($rules[]; (.ips // []) | length > 0) then "IPIfNonMatch" else "AsIs" end),
             rules: (
+                # BT 屏蔽默认开启（旧版本的状态文件没有这一项）。只能识别未加密的 BT
+                (if .routing.blockBT != false then [{type: "field", protocol: ["bittorrent"], outboundTag: "block"}] else [] end) +
                 (if .routing.blockQUIC then [{type: "field", network: "udp", port: "443", outboundTag: "block"}] else [] end) +
                 [$rules[] | (
                     (if (.domains // []) | length > 0 then {type: "field", domain: .domains, outboundTag: .outbound} else empty end),
