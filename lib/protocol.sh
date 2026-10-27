@@ -17,6 +17,13 @@ proto_call() {
     "$(proto_fn "${p}" "${fn}")" "$@"
 }
 
+# 对外监听协议端口的程序：默认是 Xray，协议可以用 <协议>_listener 改成 nginx
+proto_listener() {
+    local fn
+    fn=$(proto_fn "$1" listener)
+    if declare -F "${fn}" >/dev/null; then "${fn}"; else printf 'xray'; fi
+}
+
 proto_get() { jq -r --arg p "$1" ".protocols[\$p]$2 // empty" "${EZ_STATE}"; }
 
 # 把参数写进 .protocols[协议]：proto_set 协议 '{port: 443}' [--arg ...]

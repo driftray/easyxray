@@ -6,7 +6,7 @@ doc_warn() { printf '  %s注意%s   %s\n' "${C_YELLOW}" "${C_RESET}" "$*"; }
 doc_bad() { printf '  %s有问题%s %s\n' "${C_RED}" "${C_RESET}" "$*"; }
 
 ez_doctor() {
-    local v p port proto days level size need missing current fresh
+    local v p port proto listener days level size need missing current fresh
     info "服务"
     if systemctl is-active easyxray >/dev/null 2>&1; then doc_ok "Xray 运行中"; else doc_bad "Xray 没有运行（journalctl -u easyxray 查看原因）"; fi
     v=$(xray_installed_version)
@@ -22,10 +22,14 @@ ez_doctor() {
         [[ -z "${p}" ]] && continue
         port=$(proto_get "${p}" .port)
         proto=$(proto_call "${p}" transport)
-        if port_in_use "${port}" "${proto}" && [[ "$(port_owner "${port}" "${proto}")" == "xray" ]]; then
-            doc_ok "$(proto_call "${p}" title)  ${proto^^} ${port}"
+        listener=$(proto_listener "${p}")
+        if port_in_use "${port}" "${proto}" && [[ "$(port_owner "${port}" "${proto}")" == "${listener}" ]]; then
+            doc_ok "$(proto_call "${p}" title)  ${proto^^} ${port}$([[ "${listener}" == nginx ]] && printf '（Nginx 转发）')"
         else
-            doc_bad "$(proto_call "${p}" title)  ${proto^^} ${port} 没有被 Xray 监听"
+            doc_bad "$(proto_call "${p}" title)  ${proto^^} ${port} 没有被 ${listener^} 监听"
+        fi
+        if [[ "${listener}" == nginx ]] && ! port_in_use "${EZ_XHTTP_BACKEND_PORT}" tcp; then
+            doc_bad "$(proto_call "${p}" title)  Xray 没有在本机 ${EZ_XHTTP_BACKEND_PORT} 端口监听"
         fi
     done < <(enabled_protocols)
     doc_warn "云服务商的安全组需要放行：$(required_ports | sort -u | tr '\n' ' ')（从服务器内部无法检测）"

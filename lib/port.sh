@@ -59,8 +59,8 @@ check_port_free() {
     fi
     if port_in_use "${port}" "${proto}"; then
         owner=$(port_owner "${port}" "${proto}")
-        # 端口被本程序的 Xray 占用（例如重新生成配置时），可以继续使用
-        [[ "${owner}" == "xray" && "${current}" == "${port}" ]] && return 0
+        # 端口被本程序占用（例如重新生成配置时，由 Xray 或 Nginx 监听），可以继续使用
+        [[ "${current}" == "${port}" && ( "${owner}" == "xray" || "${owner}" == "nginx" ) ]] && return 0
         die "${proto^^} ${port} 已被 ${owner:-其他程序} 占用。请先停止占用的程序，或换一个端口"
     fi
 }

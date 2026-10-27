@@ -42,6 +42,16 @@ snapshot_restore_files() {
     fi
 }
 
+# 重启 Xray 并重载 Nginx。某个端口从 Nginx 换回 Xray 监听时（例如回滚），Xray 第一次启动会因为
+# 端口还被 Nginx 占着而失败，所以在 Nginx 重载后再检查一次
+services_reload() {
+    xray_restart
+    nginx_reload
+    no_system && return 0
+    sleep 1
+    systemctl is-active --quiet easyxray || xray_restart
+}
+
 # 每个已启用协议的端口都在监听（TCP/UDP 分开），Xray 在运行
 health_check() {
     no_system && return 0
@@ -99,15 +109,13 @@ ez_apply() {
         return 1
     fi
 
-    xray_restart
-    nginx_reload
+    services_reload
     sync_firewall
     if ! health_check; then
         err "新配置启动失败，正在恢复上一份配置..."
         snapshot_restore_files "${snapshot}"
         fix_permissions
-        xray_restart
-        nginx_reload
+        services_reload
         sync_firewall
         return 1
     fi
@@ -137,8 +145,7 @@ ez_rollback() {
     info "恢复到快照：$(basename "${last}")"
     snapshot_restore_files "${last}"
     fix_permissions
-    xray_restart
-    nginx_reload
+    services_reload
     sync_firewall
     rm -rf "${last}"
     health_check && ok "已恢复"

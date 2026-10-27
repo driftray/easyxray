@@ -21,7 +21,7 @@ EZ_NGINX_CONF=${EZ_ROOT}/etc/nginx/conf.d/easyxray.conf
 EZ_USER=easyxray
 
 # easyxray 自身的版本
-EZ_VERSION=0.2.0
+EZ_VERSION=0.3.0
 # 发布地址：更新时从这个仓库的 GitHub Release 下载
 EZ_REPO=driftray/easyxray
 
@@ -32,6 +32,10 @@ EZ_PORT_RANGE_DEFAULT=8000-8100
 # 本机 Nginx：Reality 回落站点（TLS）和 VLESS-TLS-Vision 回落站点（明文），只监听 127.0.0.1
 EZ_REALITY_TARGET_PORT=31305
 EZ_VISION_FALLBACK_PORT=31306
+# VLESS-TLS-Vision 协商出 h2 时的回落站点（明文 HTTP/2）
+EZ_VISION_H2_FALLBACK_PORT=31308
+# XHTTP-TLS 由 Nginx 对外监听，再用 grpc_pass 转给 Xray 的这个本机端口
+EZ_XHTTP_BACKEND_PORT=31307
 
 if [[ -t 1 ]]; then
     C_RED=$'\e[31m' C_GREEN=$'\e[32m' C_YELLOW=$'\e[33m' C_BLUE=$'\e[36m' C_RESET=$'\e[0m'
