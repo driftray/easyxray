@@ -219,6 +219,8 @@ sudo ezx sub
 | Shadowrocket | iOS、iPadOS、macOS（Apple 芯片） | [App Store](https://apps.apple.com/us/app/shadowrocket/id932747118)（付费，需非中国大陆区账号） | 在「设置 → TCP」中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 `chrome140`、`safari26_3` |
 | v2rayN | Windows、macOS、Linux | [GitHub](https://github.com/2dust/v2rayN/releases) | 使用默认设置 |
 
+Clash（mihomo）和 sing-box 内核的客户端（如 Clash Verge、FlClash、Hiddify、Karing）目前还不支持 Xray 26.9.8 起 Reality 要求的 X25519MLKEM768，暂时无法连接 Reality-Vision 和 Reality-XHTTP，可以改用 Hysteria2、XHTTP-TLS 或 VLESS-TLS-Vision。
+
 使用 Hysteria2 节点时，在客户端中按自己宽带的实际速度填写上行 / 下行带宽，下行建议填实测下载速度的 80%~90%。
 
 ## 菜单使用说明
