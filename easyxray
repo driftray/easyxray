@@ -717,16 +717,17 @@ menu_versions() {
     local v latest xlatest
     latest=$(latest_release)
     xlatest=$(latest_release XTLS/Xray-core)
+    xlatest=${xlatest:+v${xlatest}}
     printf '\n'
     ui_top
     ui_title "版本更新"
     ui_rule
     ui_row "easyxray  当前 ${EZ_VERSION}    最新 ${latest:-${C_DIM}获取失败${C_RESET}}"
-    ui_row "Xray      当前 $(xray_installed_version)    推荐 ${EZ_XRAY_RECOMMENDED}    最新 ${xlatest:+v${xlatest}}${xlatest:-${C_DIM}获取失败${C_RESET}}"
+    ui_row "Xray      当前 $(xray_installed_version)    推荐 ${EZ_XRAY_RECOMMENDED}    最新 ${xlatest:-${C_DIM}获取失败${C_RESET}}"
     ui_row "geo 数据  $(geo_date)    每周自动更新：$(geo_auto_enabled && echo 开 || echo 关)"
     ui_rule
-    ui_menu 1 "更新 easyxray" 2 "Xray 切换到推荐版本"
-    ui_menu 3 "Xray 更新到最新正式版" 4 "Xray 指定其他版本"
+    ui_menu 1 "更新 easyxray" 2 "Xray 换到推荐版本"
+    ui_menu 3 "Xray 换到最新正式版" 4 "Xray 换到指定版本"
     ui_menu 5 "更新 geo 数据" 6 "geo 自动更新：$(geo_auto_enabled && echo 开 || echo 关)"
     ui_menu 0 "返回" "" ""
     ui_bottom
