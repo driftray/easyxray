@@ -52,7 +52,7 @@ xray_installed_version() {
 # 下载指定版本，用官方 .dgst 文件校验 SHA256，校验通过才替换
 install_xray() {
     local version=$1 arch tmp url expected actual
-    [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "版本号格式不正确：${version}（例如 v26.10.21）"
+    [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "版本号格式不正确：${version}（例如 v26.10.29）"
     [[ "$(xray_installed_version)" == "${version}" ]] && return 0
     no_system && die "测试模式下请用 EZ_XRAY_BIN 指定 xray"
     arch=$(xray_arch)

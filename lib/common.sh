@@ -26,7 +26,7 @@ EZ_VERSION=0.4.0
 EZ_REPO=driftray/easyxray
 
 # 推荐的 Xray 版本：26.10.21 起 Reality 不接受旧版 TLS 指纹，订阅链接因此不带 fp
-EZ_XRAY_RECOMMENDED=v26.10.21
+EZ_XRAY_RECOMMENDED=v26.10.29
 # 除 Reality-Vision（固定 443）外，其他协议在这个范围里随机选空闲端口
 EZ_PORT_RANGE_DEFAULT=8000-8100
 # 本机 Nginx：Reality 回落站点（TLS）和 VLESS-TLS-Vision 回落站点（明文），只监听 127.0.0.1

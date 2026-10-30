@@ -4,8 +4,9 @@
 # 测试时可以设置 EZ_RELEASE_BASE 为本地目录（file:///path），代替 Release 下载地址
 
 # 最新发布的版本号（不带 v）：读 releases/latest 的跳转地址，不调用 GitHub API，避免频率限制
+# releases/latest 不包括预发布版本。参数为仓库，默认是 easyxray
 latest_release() {
-    curl -fsSI -o /dev/null -w '%{redirect_url}' --max-time 15 "https://github.com/${EZ_REPO}/releases/latest" |
+    curl -fsSI -o /dev/null -w '%{redirect_url}' --max-time 15 "https://github.com/${1:-${EZ_REPO}}/releases/latest" |
         sed -n 's#.*/tag/v\{0,1\}##p'
 }
 

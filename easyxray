@@ -25,7 +25,7 @@ easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
                                   出口：direct、block、warp-ipv4；规则用逗号分隔，例如 anthropic,example.com,geoip:cn
                                   不带前缀的名称会去 geosite 列表里查（anthropic = geosite:anthropic）
   warp setup | remove             注册或删除 WARP 出口
-  xray version | use [版本]       查看或切换 Xray 版本（不填为推荐版本）
+  xray version | use [版本|latest] 查看或切换 Xray 版本（不填为推荐版本，latest 为最新正式版）
   update [版本]                   更新 easyxray 到最新发布版本（或指定版本），会校验 SHA256
   geo update | auto on|off        更新 geoip/geosite 数据 / 开关每周自动更新
   rekey [协议]                    重新生成密钥（不填为全部协议），客户端更新订阅后使用新密钥
@@ -290,10 +290,20 @@ cmd_warp() {
 cmd_xray() {
     need_installed
     case "${1:-version}" in
-    version) printf '当前：%s  推荐：%s\n' "$(xray_installed_version)" "${EZ_XRAY_RECOMMENDED}" ;;
+    version)
+        local latest
+        latest=$(latest_release XTLS/Xray-core)
+        printf '当前：%s  推荐：%s  最新正式版：%s\n' "$(xray_installed_version)" "${EZ_XRAY_RECOMMENDED}" "${latest:+v${latest}}"
+        ;;
     use)
         local version=${2:-${EZ_XRAY_RECOMMENDED}} prev
         require_root
+        if [[ "${version}" == latest ]]; then
+            version=$(latest_release XTLS/Xray-core)
+            [[ -n "${version}" ]] || die "无法获取 Xray 最新版本，请检查服务器能否访问 github.com"
+            version=v${version}
+        fi
+        [[ "${version}" == "${EZ_XRAY_RECOMMENDED}" ]] || warn "Xray ${version} 还没有经过 easyxray 测试，推荐版本是 ${EZ_XRAY_RECOMMENDED}"
         prev="${EZ_XRAY_BIN}.prev"
         cp -p "${EZ_XRAY_BIN}" "${prev}"
         install_xray "${version}"
@@ -306,7 +316,7 @@ cmd_xray() {
             die "新版本无法使用当前配置，已换回原来的版本"
         fi
         ;;
-    *) die "用法：easyxray xray version | use [版本]" ;;
+    *) die "用法：easyxray xray version | use [版本|latest]" ;;
     esac
 }
 
@@ -704,19 +714,21 @@ menu_routing() {
 }
 
 menu_versions() {
-    local v latest
+    local v latest xlatest
     latest=$(latest_release)
+    xlatest=$(latest_release XTLS/Xray-core)
     printf '\n'
     ui_top
     ui_title "版本更新"
     ui_rule
     ui_row "easyxray  当前 ${EZ_VERSION}    最新 ${latest:-${C_DIM}获取失败${C_RESET}}"
-    ui_row "Xray      当前 $(xray_installed_version)    推荐 ${EZ_XRAY_RECOMMENDED}"
+    ui_row "Xray      当前 $(xray_installed_version)    推荐 ${EZ_XRAY_RECOMMENDED}    最新 ${xlatest:+v${xlatest}}${xlatest:-${C_DIM}获取失败${C_RESET}}"
     ui_row "geo 数据  $(geo_date)    每周自动更新：$(geo_auto_enabled && echo 开 || echo 关)"
     ui_rule
     ui_menu 1 "更新 easyxray" 2 "Xray 切换到推荐版本"
-    ui_menu 3 "Xray 指定其他版本" 4 "更新 geo 数据"
-    ui_menu 5 "geo 自动更新：$(geo_auto_enabled && echo 开 || echo 关)" 0 "返回"
+    ui_menu 3 "Xray 更新到最新正式版" 4 "Xray 指定其他版本"
+    ui_menu 5 "更新 geo 数据" 6 "geo 自动更新：$(geo_auto_enabled && echo 开 || echo 关)"
+    ui_menu 0 "返回" "" ""
     ui_bottom
     case "$(ui_ask "请选择：")" in
     1)
@@ -726,13 +738,14 @@ menu_versions() {
         exec "${EZ_HOME}/easyxray" menu
         ;;
     2) (cmd_xray use "${EZ_XRAY_RECOMMENDED}") ;;
-    3)
-        v=$(ui_ask "版本号（例如 v26.10.21，回车返回）：")
+    3) (cmd_xray use latest) ;;
+    4)
+        v=$(ui_ask "版本号（例如 ${EZ_XRAY_RECOMMENDED}，回车返回）：")
         [[ -n "${v}" ]] || return 0
         (cmd_xray use "${v}")
         ;;
-    4) (cmd_geo update) ;;
-    5) if geo_auto_enabled; then (cmd_geo auto off); else (cmd_geo auto on); fi ;;
+    5) (cmd_geo update) ;;
+    6) if geo_auto_enabled; then (cmd_geo auto off); else (cmd_geo auto on); fi ;;
     *) return 0 ;;
     esac
     ui_pause
