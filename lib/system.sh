@@ -145,6 +145,36 @@ xray_restart() {
     systemctl restart easyxray
 }
 
+# easyxray 写入的内核参数（BBR、MPTCP）都放在这一个文件里
+EZ_SYSCTL_CONF=/etc/sysctl.d/99-easyxray.conf
+
+# 在 EZ_SYSCTL_CONF 里设置或删除一项：sysctl_conf_set 名称 值 / sysctl_conf_del 名称
+sysctl_conf_set() {
+    sysctl_conf_del "$1"
+    printf '%s=%s\n' "$1" "$2" >>"${EZ_SYSCTL_CONF}"
+}
+sysctl_conf_del() {
+    [[ -f "${EZ_SYSCTL_CONF}" ]] || return 0
+    local rest
+    rest=$(grep -v "^$1=" "${EZ_SYSCTL_CONF}")
+    if [[ -n "${rest}" ]]; then printf '%s\n' "${rest}" >"${EZ_SYSCTL_CONF}"; else rm -f "${EZ_SYSCTL_CONF}"; fi
+}
+sysctl_conf_has() { [[ -f "${EZ_SYSCTL_CONF}" ]] && grep -qx "$1=$2" "${EZ_SYSCTL_CONF}"; }
+
+# 0.5.0 之前 BBR 设置写在 99-easyxray-bbr.conf 和 easyxray-bbr.conf，合并到新文件名
+migrate_sysctl_conf() {
+    no_system && return 0
+    local line
+    if [[ -f /etc/sysctl.d/99-easyxray-bbr.conf ]]; then
+        while IFS= read -r line; do
+            [[ "${line}" == *=* ]] && sysctl_conf_set "${line%%=*}" "${line#*=}"
+        done </etc/sysctl.d/99-easyxray-bbr.conf
+        rm -f /etc/sysctl.d/99-easyxray-bbr.conf
+    fi
+    [[ -f /etc/modules-load.d/easyxray-bbr.conf ]] && mv -f /etc/modules-load.d/easyxray-bbr.conf /etc/modules-load.d/easyxray.conf
+    return 0
+}
+
 enable_bbr() {
     no_system && return 0
     [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" == "bbr" ]] && return 0
@@ -153,8 +183,9 @@ enable_bbr() {
         warn "内核不支持 BBR，跳过"
         return 0
     }
-    echo tcp_bbr >/etc/modules-load.d/easyxray-bbr.conf
-    printf 'net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n' >/etc/sysctl.d/99-easyxray-bbr.conf
+    echo tcp_bbr >/etc/modules-load.d/easyxray.conf
+    sysctl_conf_set net.core.default_qdisc fq
+    sysctl_conf_set net.ipv4.tcp_congestion_control bbr
     sysctl --system >/dev/null 2>&1
     ok "已开启 BBR"
 }
@@ -166,12 +197,10 @@ xray_too_old() {
     [[ -n "${v}" ]] && version_newer "${EZ_XRAY_MIN#v}" "${v#v}"
 }
 
-EZ_MPTCP_CONF=/etc/sysctl.d/99-easyxray-mptcp.conf
-
 # 用户自己写过 net.mptcp.enabled 的配置文件（不含 easyxray 的），没有时为空
 mptcp_user_conf() {
     grep -lsE '^[[:space:]]*net[./]mptcp[./]enabled[[:space:]]*=' /etc/sysctl.conf /etc/sysctl.d/*.conf |
-        grep -vx "${EZ_MPTCP_CONF}" | head -n 1
+        grep -vx "${EZ_SYSCTL_CONF}" | head -n 1
 }
 
 # 用户用 ezx mptcp on 保持开启
@@ -189,8 +218,8 @@ disable_mptcp() {
         [[ "$(sysctl -n net.mptcp.enabled)" == "0" ]] || warn "${conf} 里设置了 net.mptcp.enabled，easyxray 不修改 MPTCP"
         return 0
     fi
-    [[ "$(sysctl -n net.mptcp.enabled)" == "0" && -f "${EZ_MPTCP_CONF}" ]] && return 0
-    printf 'net.mptcp.enabled=0\n' >"${EZ_MPTCP_CONF}"
+    [[ "$(sysctl -n net.mptcp.enabled)" == "0" ]] && sysctl_conf_has net.mptcp.enabled 0 && return 0
+    sysctl_conf_set net.mptcp.enabled 0
     sysctl -q -w net.mptcp.enabled=0
     ok "已关闭 MPTCP"
 }
@@ -198,8 +227,8 @@ disable_mptcp() {
 # 删除 easyxray 的 MPTCP 设置，恢复系统默认（开启）
 restore_mptcp() {
     no_system && return 0
-    [[ -f "${EZ_MPTCP_CONF}" ]] || return 0
-    rm -f "${EZ_MPTCP_CONF}"
+    sysctl_conf_has net.mptcp.enabled 0 || return 0
+    sysctl_conf_del net.mptcp.enabled
     [[ -n "$(mptcp_user_conf)" ]] || sysctl -q -w net.mptcp.enabled=1 2>/dev/null
     return 0
 }
@@ -208,6 +237,7 @@ restore_mptcp() {
 ensure_security() {
     no_system && return 0
     local v
+    migrate_sysctl_conf
     disable_mptcp
     xray_too_old || return 0
     v=$(xray_latest_version)

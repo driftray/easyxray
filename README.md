@@ -470,6 +470,7 @@ ezx uninstall --purge                 # 完全卸载
 | `/etc/nginx/conf.d/easyxray.conf` | 生成的 Nginx 配置 |
 | `/etc/systemd/system/easyxray.service` | Xray 服务 |
 | `/etc/systemd/system/easyxray-geo.timer` | geo 数据每周自动更新 |
+| `/etc/sysctl.d/99-easyxray.conf` | 内核参数：BBR、关闭 MPTCP |
 | `/root/easyxray-backup-*.tar.gz` | 导出的备份文件 |
 
 ## 常见问题
