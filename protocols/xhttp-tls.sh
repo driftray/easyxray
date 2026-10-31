@@ -30,7 +30,9 @@ xhttp_tls_inbound() {
         settings: {clients: $clients, decryption: "none"},
         streamSettings: {
             network: "xhttp", security: "none",
-            xhttpSettings: {host: $domain, path: $path, mode: "auto"}
+            xhttpSettings: {host: $domain, path: $path, mode: "auto"},
+            # 只有 Nginx 能连到这个本机端口，它会用客户端的真实 IP 覆盖 X-Forwarded-For
+            sockopt: {trustedXForwardedFor: ["X-Forwarded-For"]}
         },
         sniffing: $sniffing
     }'
@@ -46,13 +48,18 @@ xhttp_tls_link() {
 }
 
 # Nginx 对外监听的 server 块：TLS 由 Nginx 处理，XHTTP 路径转给 Xray，其他路径返回伪装站点
+# 超时与 Xray 官方示例（Xray-examples/VLESS-XHTTP3-Nginx）一致；X-Forwarded-For 用 $remote_addr 覆盖，客户端无法伪造
 xhttp_tls_nginx() {
     nginx_tls_server "$(proto_get xhttp-tls .port)" <<EOF
+    client_header_timeout 5m;
+    keepalive_timeout 5m;
     location ^~ $(proto_get xhttp-tls .path)/ {
         client_max_body_size 0;
-        grpc_read_timeout 1h;
-        grpc_send_timeout 1h;
+        client_body_timeout 5m;
+        grpc_read_timeout 315;
+        grpc_send_timeout 5m;
         grpc_set_header Host \$host;
+        grpc_set_header X-Forwarded-For \$remote_addr;
         grpc_pass grpc://127.0.0.1:${EZ_XHTTP_BACKEND_PORT};
     }
 EOF

@@ -42,6 +42,7 @@ xpath=$(jq -r '.protocols["xhttp-tls"].path' "${R}/etc/easyxray/state.json")
 check "XHTTP-TLS 的 Xray 只监听本机" cfg '.inbounds[] | select(.tag == "xhttp-tls") | .listen == "127.0.0.1" and .port == 31307 and .streamSettings.security == "none"'
 check "XHTTP-TLS 端口由 Nginx 监听" grep -q "listen ${xport} ssl" "${N}"
 check "XHTTP-TLS 路径用 grpc_pass 转给 Xray" grep -q "location ^~ ${xpath}/" "${N}"
+check "XHTTP-TLS 传递真实 IP 且不可伪造" bash -c "grep -q 'grpc_set_header X-Forwarded-For \$remote_addr;' ${N} && jq -e '.inbounds[] | select(.tag == \"xhttp-tls\") | .streamSettings.sockopt.trustedXForwardedFor == [\"X-Forwarded-For\"]' ${C} >/dev/null"
 check "TLS-Vision 支持 h2 并按 ALPN 回落" cfg '.inbounds[] | select(.tag == "vless-tls-vision") | .streamSettings.tlsSettings.alpn == ["h2", "http/1.1"] and .settings.fallbacks == [{alpn: "h2", dest: "127.0.0.1:31308"}, {dest: "127.0.0.1:31306"}]'
 check "Nginx 有 HTTP/2 回落站点" grep -q "listen 127.0.0.1:31308" "${N}"
 check "XHTTP-TLS 分享链接端口不变" bash -c "base64 -d <${R}/etc/easyxray/subscribe/* 2>/dev/null | grep -q 'type=xhttp&sni' && base64 -d <\$(ls ${R}/etc/easyxray/subscribe/* | head -1) | grep -q '@test.example.com:${xport}?encryption=none&security=tls&type=xhttp'"
