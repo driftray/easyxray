@@ -49,12 +49,12 @@ sniffing_json() {
     printf '%s' '{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}'
 }
 
-# 生成 Reality 密钥对，输出 "私钥 公钥"。兼容新旧两种 xray x25519 输出格式
+# 生成 Reality 密钥对，输出 "私钥 公钥"（xray x25519 输出里公钥一行叫 Password）
 reality_keypair() {
     local out priv pub
     out=$("${EZ_XRAY_BIN}" x25519) || die "生成 Reality 密钥失败"
     priv=$(awk -F': *' 'tolower($1) ~ /private/ {print $2; exit}' <<<"${out}")
-    pub=$(awk -F': *' 'tolower($1) ~ /password|public/ {print $2; exit}' <<<"${out}")
+    pub=$(awk -F': *' 'tolower($1) ~ /password/ {print $2; exit}' <<<"${out}")
     [[ -n "${priv}" && -n "${pub}" ]] || die "无法解析 xray x25519 的输出"
     printf '%s %s\n' "${priv}" "${pub}"
 }

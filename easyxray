@@ -83,7 +83,6 @@ cmd_install() {
         --port-range) range=$2; shift ;;
         --email) email=$2; shift ;;
         --restore) restore=$2; shift ;;
-        --agree-tos) ;; # 兼容旧参数：安装时自动同意
         *) die "未知参数：$1" ;;
         esac
         shift
