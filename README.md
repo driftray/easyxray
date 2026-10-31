@@ -41,7 +41,7 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 
 - **修改安全**：所有修改先经过 `xray run -test` 和 `nginx -t` 校验，通过后才替换；替换后服务启动失败或端口没有监听，自动恢复到上一份配置。保留最近 5 份快照，可以随时回滚。
 - **安装与更新安全**：不运行第三方安装脚本或二进制。easyxray 自身从本仓库的 GitHub Release 下载并校验 SHA256；证书使用系统软件源中的 `certbot`；Xray 从官方 GitHub Release 下载，并用官方 `.dgst` 文件校验 SHA256；geo 数据与 Xray 官方发布包同源，校验 SHA256 并确认当前规则可用后才替换；WARP 直接调用 Cloudflare 的注册接口。
-- **运行安全**：Xray 以专用的 `easyxray` 用户运行，只授予监听低端口和创建 WARP 网卡两项权限。状态文件和证书私钥只有 root 和服务用户可读。
+- **运行安全**：Xray 以专用的 `easyxray` 用户运行，只授予监听低端口和创建 WARP 网卡两项权限。状态文件和证书私钥只有 root 和服务用户可读。系统的 MPTCP 默认关闭，Xray 不低于安全版本 v26.10.31（见 [XTLS/Xray-core#7291](https://github.com/XTLS/Xray-core/pull/7291)）。
 - **防主动探测**：所有 TCP 端口对外都表现为同一个 Nginx 网站，使用同一张证书，同样支持 HTTP/2。Reality 未通过认证的连接转给本机 Nginx；XHTTP-TLS 由 Nginx 处理 TLS 后转发给 Xray；VLESS-TLS-Vision 按协商结果回落到 Nginx。
 - **少暴露端口**：推荐安装只启用两个协议。除 Reality-Vision 固定使用 443 外，其他协议的端口在指定范围内随机选择。
 - **独立的密钥**：Reality 密钥、shortId、XHTTP 路径和 Hysteria2 混淆密码都在安装时随机生成，怀疑泄露时可以随时重新生成。
@@ -131,7 +131,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 ╭────────────────────────────────────────────────────────
 │
 │   ┌─┐┌─┐┌─┐┬ ┬─┐ ┬┬─┐┌─┐┬ ┬
-│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.4.2
+│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.5.0
 │   └─┘┴ ┴└─┘ ┴ ┴ └─┴└─┴ ┴ ┴
 │   简单、安全的 Xray 服务器管理工具
 │   改动前自动校验 · 失败自动回滚 · 一个文件管理全部配置
@@ -231,7 +231,7 @@ Clash（mihomo）和 sing-box 内核的客户端（如 Clash Verge、FlClash、H
 ╭────────────────────────────────────────────────────────
 │
 │   ┌─┐┌─┐┌─┐┬ ┬─┐ ┬┬─┐┌─┐┬ ┬
-│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.4.2
+│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.5.0
 │   └─┘┴ ┴└─┘ ┴ ┴ └─┴└─┴ ┴ ┴
 │   简单、安全的 Xray 服务器管理工具
 │   改动前自动校验 · 失败自动回滚 · 一个文件管理全部配置
@@ -339,7 +339,7 @@ Clash（mihomo）和 sing-box 内核的客户端（如 Clash Verge、FlClash、H
 
 - Xray、Nginx 的运行状态和版本
 - 各协议端口是否由 Xray 监听
-- BBR、系统防火墙
+- BBR、MPTCP、系统防火墙
 - 证书剩余天数、日志级别和日志占用空间
 - WARP 和 QUIC 屏蔽状态
 - Xray 配置与状态文件是否一致
@@ -352,7 +352,7 @@ Clash（mihomo）和 sing-box 内核的客户端（如 Clash Verge、FlClash、H
 |---|---|
 | 1 更新 easyxray | 更新到最新发布版本，见[更新](#更新) |
 | 2 更新 Xray | 更新到 Xray 最新正式版（不包括预发布版本）。新装时也安装最新正式版 |
-| 3 Xray 换到指定版本 | 输入版本号，例如 `v26.10.31` |
+| 3 Xray 换到指定版本 | 输入版本号，不能低于安全版本 v26.10.31 |
 | 4 更新 geo 数据 | 从 [XTLS/Xray-rules-dat](https://github.com/XTLS/Xray-rules-dat)（与 Xray 官方发布包相同的来源）下载 geoip / geosite 数据，校验 SHA256 并确认当前规则可用后替换 |
 | 5 geo 自动更新 | 默认开启，每周日凌晨自动更新一次 |
 
@@ -498,8 +498,11 @@ sudo ezx update
 1. 从 GitHub Release 下载最新版本的 `easyxray.tar.gz`，校验 SHA256，校验不通过时不做任何修改。
 2. 替换 `/opt/easyxray` 下的程序文件，`bin/` 中的 Xray 保留不动。
 3. 用新版本重新生成配置。新配置没有通过校验时，自动换回原来的程序和配置。
+4. Xray 低于安全版本 v26.10.31 时自动更新到最新正式版，并关闭系统的 MPTCP。
 
 状态文件、用户、端口和密钥都不受影响，客户端不需要重新导入订阅。
+
+Linux 内核的安全漏洞只能通过系统更新修复，建议定期运行 `apt update && apt upgrade`，安装了新内核后重启服务器。
 
 ## 卸载
 

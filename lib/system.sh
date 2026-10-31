@@ -159,6 +159,38 @@ enable_bbr() {
     ok "已开启 BBR"
 }
 
+# 已安装的 Xray 低于最低安全版本
+xray_too_old() {
+    local v
+    v=$(xray_installed_version)
+    [[ -n "${v}" ]] && version_newer "${EZ_XRAY_MIN#v}" "${v#v}"
+}
+
+# 关闭 MPTCP：代理服务器用不到，关闭后任何程序都无法通过 MPTCP 监听
+disable_mptcp() {
+    no_system && return 0
+    [[ -e /proc/sys/net/mptcp/enabled ]] || return 0
+    [[ "$(sysctl -n net.mptcp.enabled)" == "0" && -f /etc/sysctl.d/99-easyxray-mptcp.conf ]] && return 0
+    printf 'net.mptcp.enabled=0\n' >/etc/sysctl.d/99-easyxray-mptcp.conf
+    sysctl -q -w net.mptcp.enabled=0
+    ok "已关闭 MPTCP"
+}
+
+# 安全基线：关闭 MPTCP，Xray 低于最低安全版本时升级到最新正式版。安装和 apply（ezx update 会调用）时执行
+ensure_security() {
+    no_system && return 0
+    local v
+    disable_mptcp
+    xray_too_old || return 0
+    v=$(xray_latest_version)
+    if [[ -z "${v}" ]]; then
+        warn "Xray $(xray_installed_version) 低于安全版本 ${EZ_XRAY_MIN}，但无法获取最新版本，请稍后运行 ezx xray use"
+        return 0
+    fi
+    warn "Xray $(xray_installed_version) 低于安全版本 ${EZ_XRAY_MIN}，升级到 ${v}"
+    (install_xray "${v}") && state_update '.xray.version = $v' --arg v "${v}"
+}
+
 install_logrotate() {
     no_system && return 0
     cat >/etc/logrotate.d/easyxray <<EOF

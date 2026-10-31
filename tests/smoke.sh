@@ -88,6 +88,7 @@ check "QUIC 屏蔽已关闭" cfg '[.routing.rules[] | select(.network == "udp")]
 
 echo "协议"
 check "Reality-Vision 不能关闭" bash -c "! bash ${HERE}/easyxray protocol disable reality-vision"
+check "不能换到低于安全版本的 Xray" bash -c "! bash ${HERE}/easyxray xray use v26.10.21 2>&1 | grep -q 已切换 && bash ${HERE}/easyxray xray use v26.10.21 2>&1 | grep -q 低于安全版本"
 port_before=$(jq -r '.inbounds[] | select(.tag == "vless-tls-vision") | .port' "${C}")
 x protocol disable vless-tls-vision >/dev/null 2>&1
 check "关闭后少一个入站" cfg '.inbounds | length == 4'

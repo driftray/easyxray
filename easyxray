@@ -144,6 +144,7 @@ cmd_install() {
     issue_cert
 
     enable_bbr
+    disable_mptcp
     install_logrotate
     install_service
     for p in "${plist[@]}"; do protocol_enable_state "${p}"; done
@@ -308,6 +309,8 @@ cmd_xray() {
             version=$(xray_latest_version)
             [[ -n "${version}" ]] || die "无法获取 Xray 最新版本，请检查服务器能否访问 github.com"
         fi
+        version_newer "${EZ_XRAY_MIN#v}" "${version#v}" &&
+            die "不能换到 ${version}：低于安全版本 ${EZ_XRAY_MIN}（旧版本默认开启 MPTCP 监听，可能被远程利用 Linux 内核漏洞）"
         if [[ "$(xray_installed_version)" == "${version}" ]]; then
             ok "已经是 Xray ${version}"
             return 0
@@ -747,7 +750,7 @@ menu_versions() {
         ;;
     2) (cmd_xray use latest) ;;
     3)
-        v=$(ui_ask "版本号（例如 v26.10.31，回车返回）：")
+        v=$(ui_ask "版本号（不低于 ${EZ_XRAY_MIN}，回车返回）：")
         [[ -n "${v}" ]] || return 0
         (cmd_xray use "${v}")
         ;;
@@ -831,7 +834,7 @@ main() {
     geo) cmd_geo "$@" ;;
     rekey) cmd_rekey "$@" ;;
     backup) need_installed; ez_backup "$@" ;;
-    apply) require_root; need_installed; ez_apply && ok "配置已更新" ;;
+    apply) require_root; need_installed; ensure_security; ez_apply && ok "配置已更新" ;;
     rollback) require_root; need_installed; ez_rollback ;;
     doctor) need_installed; ez_doctor ;;
     uninstall) cmd_uninstall "$@" ;;

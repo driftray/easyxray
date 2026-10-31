@@ -21,10 +21,12 @@ EZ_NGINX_CONF=${EZ_ROOT}/etc/nginx/conf.d/easyxray.conf
 EZ_USER=easyxray
 
 # easyxray 自身的版本
-EZ_VERSION=0.4.2
+EZ_VERSION=0.5.0
 # 发布地址：更新时从这个仓库的 GitHub Release 下载
 EZ_REPO=driftray/easyxray
 
+# Xray 最低安全版本：v26.10.31 起默认关闭 MPTCP 监听（Linux 内核 TCP 漏洞经 MPTCP 极易被远程利用，见 XTLS/Xray-core#7291）
+EZ_XRAY_MIN=v26.10.31
 # 除 Reality-Vision（固定 443）外，其他协议在这个范围里随机选空闲端口
 EZ_PORT_RANGE_DEFAULT=8000-8100
 # 本机 Nginx：Reality 回落站点（TLS）和 VLESS-TLS-Vision 回落站点（明文），只监听 127.0.0.1
