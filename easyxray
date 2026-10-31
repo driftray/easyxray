@@ -855,7 +855,7 @@ main() {
     mptcp) cmd_mptcp "$@" ;;
     rekey) cmd_rekey "$@" ;;
     backup) need_installed; ez_backup "$@" ;;
-    apply) require_root; need_installed; ensure_security; ez_apply && ok "配置已更新" ;;
+    apply) require_root; need_installed; ensure_security; install_service; ez_apply && ok "配置已更新" ;;
     rollback) require_root; need_installed; ez_rollback ;;
     doctor) need_installed; ez_doctor ;;
     uninstall) cmd_uninstall "$@" ;;

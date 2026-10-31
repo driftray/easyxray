@@ -66,8 +66,8 @@ install_xray() {
     tmp=$(mktemp -d)
     url="https://github.com/XTLS/Xray-core/releases/download/${version}/Xray-linux-${arch}.zip"
     info "下载 Xray ${version}..."
-    curl -fsSL -m 120 -o "${tmp}/xray.zip" "${url}" || { rm -rf "${tmp}"; die "下载失败：${url}"; }
-    curl -fsSL -m 30 -o "${tmp}/xray.zip.dgst" "${url}.dgst" || { rm -rf "${tmp}"; die "下载校验文件失败：${url}.dgst"; }
+    curl -fsSL --retry 2 -m 120 -o "${tmp}/xray.zip" "${url}" || { rm -rf "${tmp}"; die "下载失败：${url}"; }
+    curl -fsSL --retry 2 -m 30 -o "${tmp}/xray.zip.dgst" "${url}.dgst" || { rm -rf "${tmp}"; die "下载校验文件失败：${url}.dgst"; }
     expected=$(grep -iE '^SHA2?-?256' "${tmp}/xray.zip.dgst" | head -1 | awk -F'= *' '{print tolower($2)}')
     actual=$(sha256sum "${tmp}/xray.zip" | awk '{print $1}')
     if [[ -z "${expected}" || "${expected}" != "${actual}" ]]; then
@@ -75,6 +75,9 @@ install_xray() {
         die "Xray 文件校验失败（期望 ${expected:-未知}，实际 ${actual}），已停止安装"
     fi
     unzip -qo "${tmp}/xray.zip" xray geoip.dat geosite.dat -d "${tmp}/out" || { rm -rf "${tmp}"; die "解压失败"; }
+    # 先试运行一次，架构不对或文件损坏时不替换
+    chmod 755 "${tmp}/out/xray"
+    "${tmp}/out/xray" version >/dev/null 2>&1 || { rm -rf "${tmp}"; die "下载的 Xray 无法运行（架构不对或文件损坏），没有替换"; }
     mkdir -p "${EZ_HOME}/bin"
     install -m 755 "${tmp}/out/xray" "${EZ_HOME}/bin/xray.new"
     install -m 644 "${tmp}/out/geoip.dat" "${tmp}/out/geosite.dat" "${EZ_HOME}/bin/"
@@ -98,6 +101,7 @@ Group=${EZ_USER}
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
 NoNewPrivileges=true
+UMask=0077
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
@@ -106,6 +110,8 @@ Environment=XRAY_LOCATION_ASSET=${EZ_HOME}/bin
 ExecStart=${EZ_XRAY_BIN} run -confdir ${EZ_XRAY_CONF}
 Restart=on-failure
 RestartSec=3
+# 配置无法加载时 Xray 以 23 退出，不再反复重启
+RestartPreventExitStatus=23
 LimitNOFILE=1048576
 
 [Install]
