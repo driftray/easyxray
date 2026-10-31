@@ -161,7 +161,7 @@ sysctl_conf_del() {
 }
 sysctl_conf_has() { [[ -f "${EZ_SYSCTL_CONF}" ]] && grep -qx "$1=$2" "${EZ_SYSCTL_CONF}"; }
 
-# 0.5.0 之前 BBR 设置写在 99-easyxray-bbr.conf 和 easyxray-bbr.conf，合并到新文件名
+# 0.5.0 之前 BBR 设置写在 99-easyxray-bbr.conf，合并到新文件；开机加载模块的 easyxray-bbr.conf 不再需要（设置 BBR 时内核会自动加载模块）
 migrate_sysctl_conf() {
     no_system && return 0
     local line
@@ -171,8 +171,7 @@ migrate_sysctl_conf() {
         done </etc/sysctl.d/99-easyxray-bbr.conf
         rm -f /etc/sysctl.d/99-easyxray-bbr.conf
     fi
-    [[ -f /etc/modules-load.d/easyxray-bbr.conf ]] && mv -f /etc/modules-load.d/easyxray-bbr.conf /etc/modules-load.d/easyxray.conf
-    return 0
+    rm -f /etc/modules-load.d/easyxray-bbr.conf
 }
 
 enable_bbr() {
@@ -183,7 +182,6 @@ enable_bbr() {
         warn "内核不支持 BBR，跳过"
         return 0
     }
-    echo tcp_bbr >/etc/modules-load.d/easyxray.conf
     sysctl_conf_set net.core.default_qdisc fq
     sysctl_conf_set net.ipv4.tcp_congestion_control bbr
     sysctl --system >/dev/null 2>&1
