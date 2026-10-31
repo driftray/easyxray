@@ -41,7 +41,7 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 
 - **修改安全**：所有修改先经过 `xray run -test` 和 `nginx -t` 校验，通过后才替换；替换后服务启动失败或端口没有监听，自动恢复到上一份配置。保留最近 5 份快照，可以随时回滚。
 - **安装与更新安全**：不运行第三方安装脚本或二进制。easyxray 自身从本仓库的 GitHub Release 下载并校验 SHA256；证书使用系统软件源中的 `certbot`；Xray 从官方 GitHub Release 下载，并用官方 `.dgst` 文件校验 SHA256；geo 数据与 Xray 官方发布包同源，校验 SHA256 并确认当前规则可用后才替换；WARP 直接调用 Cloudflare 的注册接口。
-- **运行安全**：Xray 以专用的 `easyxray` 用户运行，只授予监听低端口和创建 WARP 网卡两项权限。状态文件和证书私钥只有 root 和服务用户可读。系统的 MPTCP 默认关闭，Xray 不低于安全版本 v26.10.31（见 [XTLS/Xray-core#7291](https://github.com/XTLS/Xray-core/pull/7291)）。
+- **运行安全**：Xray 以专用的 `easyxray` 用户运行，只授予监听低端口和创建 WARP 网卡两项权限。状态文件和证书私钥只有 root 和服务用户可读。系统的 MPTCP 默认关闭，Xray 不低于安全版本 v26.10.31（见 [XTLS/Xray-core#7291](https://github.com/XTLS/Xray-core/pull/7291)）。服务器做 MPTCP 多路聚合时可以用 `ezx mptcp on` 开启；自己在 sysctl 里设置过 `net.mptcp.enabled` 的，easyxray 不修改。
 - **防主动探测**：所有 TCP 端口对外都表现为同一个 Nginx 网站，使用同一张证书，同样支持 HTTP/2。Reality 未通过认证的连接转给本机 Nginx；XHTTP-TLS 由 Nginx 处理 TLS 后转发给 Xray；VLESS-TLS-Vision 按协商结果回落到 Nginx。
 - **少暴露端口**：推荐安装只启用两个协议。除 Reality-Vision 固定使用 443 外，其他协议的端口在指定范围内随机选择。
 - **独立的密钥**：Reality 密钥、shortId、XHTTP 路径和 Hysteria2 混淆密码都在安装时随机生成，怀疑泄露时可以随时重新生成。
@@ -425,6 +425,7 @@ ezx backup                            # 导出备份
 ezx rekey                             # 重新生成所有协议的密钥
 ezx geo update                        # 更新 geo 数据
 ezx geo auto off                      # 关闭 geo 数据自动更新（on 为开启）
+ezx mptcp on                          # 开启系统的 MPTCP（默认关闭，off 为关闭）
 ezx update                            # 更新 easyxray 到最新发布版本
 ezx update v0.2.0                     # 更新或换回指定版本
 ezx xray version
@@ -530,6 +531,7 @@ sudo ezx uninstall
 - 程序目录 `/opt/easyxray` 和 `easyxray`、`ezx` 命令
 - 本域名的 Let's Encrypt 证书
 - 运行 Xray 的 `easyxray` 系统用户
+- easyxray 的 MPTCP 设置，恢复系统默认
 
 用户、密钥删除后无法恢复，重新安装后客户端需要重新导入订阅。Nginx、certbot 等系统软件包和 BBR 设置会保留。
 

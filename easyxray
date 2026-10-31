@@ -28,6 +28,7 @@ easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
   xray version | use [版本]       查看或切换 Xray 版本（不填为最新正式版）
   update [版本]                   更新 easyxray 到最新发布版本（或指定版本），会校验 SHA256
   geo update | auto on|off        更新 geoip/geosite 数据 / 开关每周自动更新
+  mptcp on | off                  开启或关闭系统的 MPTCP（默认关闭，只有做 MPTCP 多路聚合时才需要开启）
   rekey [协议]                    重新生成密钥（不填为全部协议），客户端更新订阅后使用新密钥
   backup [文件]                   备份用户、密钥和设置（默认保存到 /root）
   log debug [分钟] | normal | show 临时打开调试日志（默认 30 分钟后自动恢复）
@@ -332,6 +333,25 @@ cmd_xray() {
     esac
 }
 
+# ---------- MPTCP ----------
+
+cmd_mptcp() {
+    need_installed
+    require_root
+    case "${1:-}" in
+    on)
+        state_update '.system.mptcpAllowed = true'
+        restore_mptcp
+        ok "已开启 MPTCP，升级时不会再关闭（Xray 本身仍不使用 MPTCP）"
+        ;;
+    off)
+        state_update 'del(.system.mptcpAllowed)'
+        disable_mptcp
+        ;;
+    *) die "用法：easyxray mptcp on | off" ;;
+    esac
+}
+
 # ---------- geo 数据 ----------
 
 cmd_geo() {
@@ -441,6 +461,7 @@ cmd_uninstall() {
     fi
 
     if ! no_system; then
+        restore_mptcp
         rm -f /usr/local/bin/easyxray
         [[ "$(readlink /usr/local/bin/ezx 2>/dev/null)" == "${EZ_HOME}/easyxray" ]] && rm -f /usr/local/bin/ezx
         if [[ -n "${domain}" && -d "/etc/letsencrypt/live/${domain}" ]]; then
@@ -453,7 +474,7 @@ cmd_uninstall() {
     if ! no_system && [[ "${EZ_HOME}" != "/" && -f "${EZ_HOME}/easyxray" && -f "${EZ_HOME}/lib/common.sh" ]]; then
         rm -rf "${EZ_HOME}"
     fi
-    ok "已完全卸载。系统软件包（Nginx、certbot 等）和 BBR 设置保留"
+    ok "已完全卸载。系统软件包（Nginx、certbot 等）和 BBR 设置保留，MPTCP 已恢复为系统默认"
 }
 
 # ---------- 菜单 ----------
@@ -832,6 +853,7 @@ main() {
     log) cmd_log "$@" ;;
     update) ez_update "$@" ;;
     geo) cmd_geo "$@" ;;
+    mptcp) cmd_mptcp "$@" ;;
     rekey) cmd_rekey "$@" ;;
     backup) need_installed; ez_backup "$@" ;;
     apply) require_root; need_installed; ensure_security; ez_apply && ok "配置已更新" ;;

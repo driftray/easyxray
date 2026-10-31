@@ -44,7 +44,15 @@ ez_doctor() {
     doc_warn "云服务商的安全组需要放行：$(required_ports | sort -u | tr '\n' ' ')（从服务器内部无法检测）"
 
     info "系统"
-    if [[ ! -e /proc/sys/net/mptcp/enabled || "$(sysctl -n net.mptcp.enabled)" == "0" ]]; then doc_ok "MPTCP 已关闭"; else doc_bad "MPTCP 没有关闭（运行 ezx apply 关闭）"; fi
+    if [[ ! -e /proc/sys/net/mptcp/enabled || "$(sysctl -n net.mptcp.enabled)" == "0" ]]; then
+        doc_ok "MPTCP 已关闭"
+    elif mptcp_allowed; then
+        doc_warn "MPTCP 已按设置开启（ezx mptcp off 关闭）"
+    elif [[ -n "$(mptcp_user_conf)" ]]; then
+        doc_warn "MPTCP 开启：$(mptcp_user_conf) 里设置了 net.mptcp.enabled，easyxray 没有修改"
+    else
+        doc_bad "MPTCP 没有关闭（运行 ezx mptcp off 关闭）"
+    fi
     if [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" == "bbr" ]]; then doc_ok "BBR 已开启"; else doc_bad "BBR 没有开启（跨境线路上会很慢）"; fi
     need=$(required_ports | sort -u)
     missing=''

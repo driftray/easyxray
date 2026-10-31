@@ -166,14 +166,42 @@ xray_too_old() {
     [[ -n "${v}" ]] && version_newer "${EZ_XRAY_MIN#v}" "${v#v}"
 }
 
-# 关闭 MPTCP：代理服务器用不到，关闭后任何程序都无法通过 MPTCP 监听
+EZ_MPTCP_CONF=/etc/sysctl.d/99-easyxray-mptcp.conf
+
+# 用户自己写过 net.mptcp.enabled 的配置文件（不含 easyxray 的），没有时为空
+mptcp_user_conf() {
+    grep -lsE '^[[:space:]]*net[./]mptcp[./]enabled[[:space:]]*=' /etc/sysctl.conf /etc/sysctl.d/*.conf |
+        grep -vx "${EZ_MPTCP_CONF}" | head -n 1
+}
+
+# 用户用 ezx mptcp on 保持开启
+mptcp_allowed() { state_exists && [[ "$(state_get '.system.mptcpAllowed')" == "true" ]]; }
+
+# 关闭 MPTCP：代理服务器用不到，关闭后宿主机上的程序都无法通过 MPTCP 监听（Docker 容器有自己的网络命名空间，不受影响）
+# 用户用 ezx mptcp on 开启过，或自己设置过 net.mptcp.enabled 时不修改
 disable_mptcp() {
     no_system && return 0
     [[ -e /proc/sys/net/mptcp/enabled ]] || return 0
-    [[ "$(sysctl -n net.mptcp.enabled)" == "0" && -f /etc/sysctl.d/99-easyxray-mptcp.conf ]] && return 0
-    printf 'net.mptcp.enabled=0\n' >/etc/sysctl.d/99-easyxray-mptcp.conf
+    mptcp_allowed && return 0
+    local conf
+    conf=$(mptcp_user_conf)
+    if [[ -n "${conf}" ]]; then
+        [[ "$(sysctl -n net.mptcp.enabled)" == "0" ]] || warn "${conf} 里设置了 net.mptcp.enabled，easyxray 不修改 MPTCP"
+        return 0
+    fi
+    [[ "$(sysctl -n net.mptcp.enabled)" == "0" && -f "${EZ_MPTCP_CONF}" ]] && return 0
+    printf 'net.mptcp.enabled=0\n' >"${EZ_MPTCP_CONF}"
     sysctl -q -w net.mptcp.enabled=0
     ok "已关闭 MPTCP"
+}
+
+# 删除 easyxray 的 MPTCP 设置，恢复系统默认（开启）
+restore_mptcp() {
+    no_system && return 0
+    [[ -f "${EZ_MPTCP_CONF}" ]] || return 0
+    rm -f "${EZ_MPTCP_CONF}"
+    [[ -n "$(mptcp_user_conf)" ]] || sysctl -q -w net.mptcp.enabled=1 2>/dev/null
+    return 0
 }
 
 # 安全基线：关闭 MPTCP，Xray 低于最低安全版本时升级到最新正式版。安装和 apply（ezx update 会调用）时执行
