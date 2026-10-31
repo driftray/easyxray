@@ -238,7 +238,7 @@ Clash（mihomo）和 sing-box 内核的客户端（如 Clash Verge、FlClash、H
 │
 ├────────────────────────────────────────────────────────
 │ 域名   box.example.com
-│ 状态   ● Xray v26.10.29 运行中    用户 1    ● WARP 已开启
+│ 状态   ● Xray v26.10.31 运行中    用户 1    ● WARP 已开启
 ├────────────────────────────────────────────────────────
 │ ● Reality-Vision      TCP 443
 │ ● Hysteria2           UDP 8042
@@ -351,11 +351,10 @@ Clash（mihomo）和 sing-box 内核的客户端（如 Clash Verge、FlClash、H
 | 选项 | 说明 |
 |---|---|
 | 1 更新 easyxray | 更新到最新发布版本，见[更新](#更新) |
-| 2 Xray 换到推荐版本 | 推荐版本经过 easyxray 测试，当前为 v26.10.29 |
-| 3 Xray 换到最新正式版 | 不包括预发布版本；新版本可能还没有经过 easyxray 测试 |
-| 4 Xray 换到指定版本 | 输入版本号，例如 `v26.10.29` |
-| 5 更新 geo 数据 | 从 [XTLS/Xray-rules-dat](https://github.com/XTLS/Xray-rules-dat)（与 Xray 官方发布包相同的来源）下载 geoip / geosite 数据，校验 SHA256 并确认当前规则可用后替换 |
-| 6 geo 自动更新 | 默认开启，每周日凌晨自动更新一次 |
+| 2 更新 Xray | 更新到 Xray 最新正式版（不包括预发布版本）。新装时也安装最新正式版 |
+| 3 Xray 换到指定版本 | 输入版本号，例如 `v26.10.31` |
+| 4 更新 geo 数据 | 从 [XTLS/Xray-rules-dat](https://github.com/XTLS/Xray-rules-dat)（与 Xray 官方发布包相同的来源）下载 geoip / geosite 数据，校验 SHA256 并确认当前规则可用后替换 |
+| 5 geo 自动更新 | 默认开启，每周日凌晨自动更新一次 |
 
 切换 Xray 前备份当前的 Xray；新版本无法加载当前配置时，自动换回原来的版本。
 
@@ -429,7 +428,7 @@ ezx geo auto off                      # 关闭 geo 数据自动更新（on 为�
 ezx update                            # 更新 easyxray 到最新发布版本
 ezx update v0.2.0                     # 更新或换回指定版本
 ezx xray version
-ezx xray use                          # 切换到推荐版本（latest 为最新正式版，也可以写版本号）
+ezx xray use                          # 更新到 Xray 最新正式版（也可以写版本号）
 ezx log debug 30                      # 开启调试日志 30 分钟
 ezx log normal
 ezx log show

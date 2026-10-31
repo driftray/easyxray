@@ -34,6 +34,7 @@ echo "安装"
 x install --domain test.example.com --full >/dev/null 2>&1
 check "完全安装后有 5 个入站" cfg '.inbounds | length == 5'
 check "Xray 配置校验通过" xray_ok
+check "状态文件记录了安装的 Xray 版本" jq -e --arg v "v$("${XRAY}" version | awk 'NR==1{print $2}')" '.xray.version == $v' "${R}/etc/easyxray/state.json"
 check "Reality-Vision 在 443" cfg '.inbounds[] | select(.tag == "reality-vision") | .port == 443'
 check "其他协议端口在 8000~8100" jq -e '[.protocols | to_entries[] | select(.key != "reality-vision") | .value.port] | all(. >= 8000 and . <= 8100)' "${R}/etc/easyxray/state.json"
 N="${R}/etc/nginx/conf.d/easyxray.conf"

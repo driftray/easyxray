@@ -6,11 +6,18 @@ doc_warn() { printf '  %s注意%s   %s\n' "${C_YELLOW}" "${C_RESET}" "$*"; }
 doc_bad() { printf '  %s有问题%s %s\n' "${C_RED}" "${C_RESET}" "$*"; }
 
 ez_doctor() {
-    local v p port proto listener days level size need missing current fresh
+    local v latest p port proto listener days level size need missing current fresh
     info "服务"
     if systemctl is-active easyxray >/dev/null 2>&1; then doc_ok "Xray 运行中"; else doc_bad "Xray 没有运行（journalctl -u easyxray 查看原因）"; fi
     v=$(xray_installed_version)
-    if [[ "${v}" == "${EZ_XRAY_RECOMMENDED}" ]]; then doc_ok "Xray ${v}（推荐版本）"; else doc_warn "Xray ${v:-未安装}，推荐版本是 ${EZ_XRAY_RECOMMENDED}"; fi
+    latest=$(xray_latest_version)
+    if [[ -z "${v}" ]]; then
+        doc_bad "Xray 没有安装"
+    elif [[ -n "${latest}" ]] && version_newer "${latest#v}" "${v#v}"; then
+        doc_warn "Xray ${v}，有新版本 ${latest}（菜单「6 版本更新」或 ezx xray use）"
+    else
+        doc_ok "Xray ${v}"
+    fi
     if systemctl is-active nginx >/dev/null 2>&1; then
         doc_ok "Nginx 运行中：$(nginx -v 2>&1 | sed -n 's#.*nginx/\([0-9.]*\).*#\1#p')，$(openssl version | awk '{print $1, $2}')"
     else
