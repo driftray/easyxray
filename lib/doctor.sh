@@ -6,7 +6,7 @@ doc_warn() { printf '  %s注意%s   %s\n' "${C_YELLOW}" "${C_RESET}" "$*"; }
 doc_bad() { printf '  %s有问题%s %s\n' "${C_RED}" "${C_RESET}" "$*"; }
 
 ez_doctor() {
-    local v latest p port proto listener days level size need missing current fresh
+    local v latest p port proto listener days level size need missing current fresh root
     info "服务"
     if systemctl is-active easyxray >/dev/null 2>&1; then doc_ok "Xray 运行中"; else doc_bad "Xray 没有运行（journalctl -u easyxray 查看原因）"; fi
     v=$(xray_installed_version)
@@ -53,7 +53,17 @@ ez_doctor() {
     else
         doc_bad "MPTCP 没有关闭（运行 ezx mptcp off 关闭）"
     fi
-    if [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" == "bbr" ]]; then doc_ok "BBR 已开启"; else doc_bad "BBR 没有开启（跨境线路上会很慢）"; fi
+    if [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" != "bbr" ]]; then
+        doc_bad "BBR 没有开启（跨境线路上会很慢）"
+    elif qdisc_is_fq; then
+        doc_ok "BBR 已开启，网卡队列 fq"
+    else
+        root=$(tc qdisc show dev "$(default_dev)" root 2>/dev/null | awk '{print $2; exit}')
+        case "${root}" in
+        mq | fq_codel | pfifo_fast) doc_warn "BBR 已开启，但网卡队列不是 fq：${root}（运行 ezx apply 更换）" ;;
+        *) doc_ok "BBR 已开启，网卡使用自己配置的队列 ${root}，easyxray 不修改" ;;
+        esac
+    fi
     need=$(required_ports | sort -u)
     missing=''
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then

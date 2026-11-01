@@ -180,9 +180,44 @@ migrate_sysctl_conf() {
     rm -f /etc/modules-load.d/easyxray-bbr.conf
 }
 
+# 默认路由所在的网卡
+default_dev() { ip route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}'; }
+
+# 网卡已经在用的队列不会跟着 default_qdisc 改变，要等重启。这里删掉根队列，内核会按 default_qdisc 重新挂上默认队列：
+# 多队列网卡是 mq，子队列为 fq；单队列网卡直接是 fq。
+# 只替换系统默认的队列（mq / fq_codel / pfifo_fast），用户自己配置的整形（htb、cake 等）不动
+apply_fq_qdisc() {
+    no_system && return 0
+    [[ "$(sysctl -n net.core.default_qdisc 2>/dev/null)" == "fq" ]] || return 0
+    local dev root
+    dev=$(default_dev)
+    [[ -n "${dev}" ]] || return 0
+    root=$(tc qdisc show dev "${dev}" root 2>/dev/null | awk '{print $2; exit}')
+    case "${root}" in
+    mq) tc qdisc show dev "${dev}" | grep -qv -e '^qdisc mq ' -e '^qdisc fq ' || return 0 ;;
+    fq) return 0 ;;
+    fq_codel | pfifo_fast) ;;
+    *) return 0 ;;
+    esac
+    tc qdisc del dev "${dev}" root 2>/dev/null
+    qdisc_is_fq || tc qdisc replace dev "${dev}" root fq 2>/dev/null
+    if qdisc_is_fq; then ok "网卡 ${dev} 的队列已换成 fq"; else warn "网卡 ${dev} 的队列没能换成 fq，重启后生效"; fi
+}
+
+# 网卡在用的队列是不是 fq（多队列时每个子队列都是 fq）
+qdisc_is_fq() {
+    local dev
+    dev=$(default_dev)
+    [[ -n "${dev}" ]] || return 0
+    ! tc qdisc show dev "${dev}" 2>/dev/null | grep -qv -e '^qdisc mq ' -e '^qdisc fq '
+}
+
 enable_bbr() {
     no_system && return 0
-    [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" == "bbr" ]] && return 0
+    if [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" == "bbr" ]]; then
+        apply_fq_qdisc
+        return 0
+    fi
     modprobe tcp_bbr 2>/dev/null
     sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr || {
         warn "内核不支持 BBR，跳过"
@@ -192,6 +227,7 @@ enable_bbr() {
     sysctl_conf_set net.ipv4.tcp_congestion_control bbr
     sysctl --system >/dev/null 2>&1
     ok "已开启 BBR"
+    apply_fq_qdisc
 }
 
 # 已安装的 Xray 低于最低安全版本
@@ -242,6 +278,7 @@ ensure_security() {
     no_system && return 0
     local v
     migrate_sysctl_conf
+    apply_fq_qdisc
     disable_mptcp
     xray_too_old || return 0
     v=$(xray_latest_version)
