@@ -64,3 +64,25 @@ xhttp_tls_nginx() {
     }
 EOF
 }
+
+xhttp_tls_mihomo() {
+    local uuid=$1 name=$2 domain
+    domain=$(state_get .domain)
+    cat <<EOF
+  - name: "$(link_name "${name}" XHTTP)"
+    type: vless
+    server: ${domain}
+    port: $(proto_get xhttp-tls .port)
+    uuid: ${uuid}
+    network: xhttp
+    udp: true
+    tls: true
+    servername: ${domain}
+    alpn: [h2]
+    client-fingerprint: chrome
+    xhttp-opts:
+      path: $(proto_get xhttp-tls .path)
+      host: ${domain}
+      mode: auto
+EOF
+}

@@ -46,14 +46,18 @@ check "XHTTP-TLS 路径用 grpc_pass 转给 Xray" grep -q "location ^~ ${xpath}/
 check "XHTTP-TLS 传递真实 IP 且不可伪造" bash -c "grep -q 'grpc_set_header X-Forwarded-For \$remote_addr;' ${N} && jq -e '.inbounds[] | select(.tag == \"xhttp-tls\") | .streamSettings.sockopt.trustedXForwardedFor == [\"X-Forwarded-For\"]' ${C} >/dev/null"
 check "TLS-Vision 支持 h2 并按 ALPN 回落" cfg '.inbounds[] | select(.tag == "vless-tls-vision") | .streamSettings.tlsSettings.alpn == ["h2", "http/1.1"] and .settings.fallbacks == [{alpn: "h2", dest: "127.0.0.1:31308"}, {dest: "127.0.0.1:31306"}]'
 check "Nginx 有 HTTP/2 回落站点" grep -q "listen 127.0.0.1:31308" "${N}"
-check "XHTTP-TLS 分享链接端口不变" bash -c "base64 -d <${R}/etc/easyxray/subscribe/* 2>/dev/null | grep -q 'type=xhttp&sni' && base64 -d <\$(ls ${R}/etc/easyxray/subscribe/* | head -1) | grep -q '@test.example.com:${xport}?encryption=none&security=tls&type=xhttp'"
+check "XHTTP-TLS 分享链接端口不变" bash -c "base64 -d <\$(ls ${R}/etc/easyxray/subscribe/* | grep -v yaml | head -1) 2>/dev/null | grep -q 'type=xhttp&sni' && base64 -d <\$(ls ${R}/etc/easyxray/subscribe/* | grep -v yaml | head -1) | grep -q '@test.example.com:${xport}?encryption=none&security=tls&type=xhttp'"
 check "端口互不重复" cfg '[.inbounds[].port] | length == (unique | length)'
 check "所有入站开启嗅探 routeOnly" cfg '[.inbounds[].sniffing.routeOnly] | all'
 check "Reality shortId 不是旧脚本的固定值" cfg '[.inbounds[] | .streamSettings.realitySettings.shortIds? // empty | .[]] | all(. != "6ba85179e30d4fc2")'
 check "默认不屏蔽 QUIC" cfg '[.routing.rules[] | select(.network == "udp")] | length == 0'
-sub_file=$(ls "${R}"/etc/easyxray/subscribe/* | head -1)
+sub_file=$(ls "${R}"/etc/easyxray/subscribe/* | grep -v yaml | head -1)
 check "订阅链接不含 fp" bash -c "! base64 -d < ${sub_file} | grep -q 'fp='"
 check "订阅有 5 条链接" bash -c "[[ \$(base64 -d < ${sub_file} | wc -l) -eq 5 ]]"
+mihomo_file=${sub_file}.yaml
+check "mihomo 配置有 5 个节点且都在策略组里" bash -c "[[ \$(grep -c '^  - name: \"' ${mihomo_file}) -eq 5 && \$(grep -c '^      - \"' ${mihomo_file}) -eq 5 ]]"
+check "mihomo 的 Reality 节点打开 ML-KEM" bash -c "[[ \$(grep -c 'support-x25519mlkem768: true' ${mihomo_file}) -eq 2 ]]"
+check "Nginx 提供 mihomo 订阅" grep -q 'mihomo_token.yaml' "${N}"
 check "第一个用户是 @xray.fake" bash -c "grep -q '@xray.fake' ${R}/etc/easyxray/state.json"
 
 echo "用户"
@@ -62,10 +66,11 @@ x user add >/dev/null 2>&1
 check "加两个用户后每个入站 3 个用户" cfg '[.inbounds[] | (.settings.clients // .settings.users) | length] | all(. == 3)'
 check "重复邮箱被拒绝" bash -c "! bash ${HERE}/easyxray user add alice@example.com"
 check "错误邮箱被拒绝" bash -c "! bash ${HERE}/easyxray user add not-an-email"
-check "每个用户一个订阅文件" bash -c "[[ \$(ls ${R}/etc/easyxray/subscribe | wc -l) -eq 3 ]]"
+check "每个用户一个订阅文件" bash -c "[[ \$(ls ${R}/etc/easyxray/subscribe | grep -vc yaml) -eq 3 ]]"
+check "每个用户一个 mihomo 配置" bash -c "[[ \$(ls ${R}/etc/easyxray/subscribe | grep -c yaml) -eq 3 ]]"
 x user del alice@example.com >/dev/null 2>&1
 check "删除后配置里没有 alice" bash -c "! grep -q alice ${C}"
-check "删除后订阅文件剩 2 个" bash -c "[[ \$(ls ${R}/etc/easyxray/subscribe | wc -l) -eq 2 ]]"
+check "删除后订阅文件剩 2 个" bash -c "[[ \$(ls ${R}/etc/easyxray/subscribe | wc -l) -eq 4 ]]"
 
 echo "分流"
 x route add direct "geosite:cn,Example.COM,1.2.3.0/24,geoip:cn" >/dev/null 2>&1

@@ -74,6 +74,27 @@ user_links() {
     done < <(enabled_protocols)
 }
 
+# 一个用户的 mihomo 配置：所有节点放进一个手动选择的策略组，其余流量规则由客户端决定
+user_mihomo() {
+    local uuid=$1 email=$2 p proxies group
+    proxies=$(while read -r p; do
+        [[ -z "${p}" ]] && continue
+        proto_call "${p}" mihomo "${uuid}" "${email}"
+    done < <(enabled_protocols))
+    group=$(sed -n 's/^  - name: \(".*"\)$/      - \1/p' <<<"${proxies}")
+    cat <<EOF
+proxies:
+${proxies}
+proxy-groups:
+  - name: easyxray
+    type: select
+    proxies:
+${group}
+rules:
+  - MATCH,easyxray
+EOF
+}
+
 # 生成订阅文件：每个用户一个，文件名是该用户的随机令牌，内容为 base64 编码的链接列表
 render_subscriptions() {
     local outdir=$1 uuid email token
@@ -81,5 +102,6 @@ render_subscriptions() {
     while IFS=$'\t' read -r uuid email token; do
         [[ -z "${token}" ]] && continue
         user_links "${uuid}" "${email}" | base64 | tr -d '\n' >"${outdir}/${token}"
+        user_mihomo "${uuid}" "${email}" >"${outdir}/${token}.yaml"
     done < <(jq -r '.users[] | [.uuid, .email, .subToken] | @tsv' "${EZ_STATE}")
 }

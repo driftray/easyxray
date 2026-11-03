@@ -46,3 +46,19 @@ hysteria2_link() {
         "${uuid}" "${domain}" "$(proto_get hysteria2 .port)" "${domain}" \
         "$(proto_get hysteria2 .obfsPassword)" "$(urlencode "$(link_name "${name}" Hy2)")"
 }
+
+hysteria2_mihomo() {
+    local uuid=$1 name=$2 domain
+    domain=$(state_get .domain)
+    cat <<EOF
+  - name: "$(link_name "${name}" Hy2)"
+    type: hysteria2
+    server: ${domain}
+    port: $(proto_get hysteria2 .port)
+    password: ${uuid}
+    sni: ${domain}
+    alpn: [h3]
+    obfs: salamander
+    obfs-password: $(proto_get hysteria2 .obfsPassword)
+EOF
+}

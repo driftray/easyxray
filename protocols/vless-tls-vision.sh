@@ -41,3 +41,22 @@ vless_tls_vision_link() {
         "${uuid}" "${domain}" "$(proto_get vless-tls-vision .port)" "${domain}" \
         "$(urlencode "$(link_name "${name}" Vision)")"
 }
+
+vless_tls_vision_mihomo() {
+    local uuid=$1 name=$2 domain
+    domain=$(state_get .domain)
+    cat <<EOF
+  - name: "$(link_name "${name}" Vision)"
+    type: vless
+    server: ${domain}
+    port: $(proto_get vless-tls-vision .port)
+    uuid: ${uuid}
+    network: tcp
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    udp: true
+    tls: true
+    servername: ${domain}
+    client-fingerprint: chrome
+EOF
+}

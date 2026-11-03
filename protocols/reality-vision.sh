@@ -46,3 +46,27 @@ reality_vision_link() {
         "$(proto_get reality-vision .publicKey)" "$(proto_get reality-vision .shortId)" \
         "$(urlencode "$(link_name "${name}" Reality)")"
 }
+
+# mihomo 连 Reality 必须用 chrome 指纹并打开 support-x25519mlkem768（Xray 26.9.8 起 Reality 的要求）
+reality_vision_mihomo() {
+    local uuid=$1 name=$2 domain
+    domain=$(state_get .domain)
+    cat <<EOF
+  - name: "$(link_name "${name}" Reality)"
+    type: vless
+    server: ${domain}
+    port: $(proto_get reality-vision .port)
+    uuid: ${uuid}
+    network: tcp
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    udp: true
+    tls: true
+    servername: ${domain}
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: $(proto_get reality-vision .publicKey)
+      short-id: $(proto_get reality-vision .shortId)
+      support-x25519mlkem768: true
+EOF
+}

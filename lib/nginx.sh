@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Nginx：80 端口（证书验证 + 跳转 HTTPS）、Reality 回落站点（127.0.0.1:31305，TLS）、Vision 回落站点（127.0.0.1:31306 HTTP/1.1，31308 HTTP/2）
-# 订阅文件也由 Reality 回落站点提供：https://域名/s/<用户令牌>
+# 订阅文件也由 Reality 回落站点提供：https://域名/s/<用户令牌>，mihomo 配置在 https://域名/s/<用户令牌>/mihomo
 
 # nginx 1.25.1 起用 "http2 on;"，更早的版本写在 listen 里
 nginx_http2_new_syntax() {
@@ -71,6 +71,12 @@ EOF
         default_type 'text/plain; charset=utf-8';
         add_header Cache-Control "no-store" always;
         alias ${EZ_SUB}/\$token;
+    }
+    location ~ "^/s/(?<mihomo_token>[0-9a-f]{32})/mihomo\$" {
+        default_type 'text/plain; charset=utf-8';
+        add_header Cache-Control "no-store" always;
+        add_header Content-Disposition 'attachment; filename="easyxray.yaml"' always;
+        alias ${EZ_SUB}/\$mihomo_token.yaml;
     }
 EOF
     cat <<EOF

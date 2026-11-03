@@ -57,3 +57,29 @@ reality_xhttp_link() {
         "$(proto_get reality-xhttp .publicKey)" "$(proto_get reality-xhttp .shortId)" \
         "$(urlencode "$(link_name "${name}" RealityXHTTP)")"
 }
+
+reality_xhttp_mihomo() {
+    local uuid=$1 name=$2 domain
+    domain=$(state_get .domain)
+    cat <<EOF
+  - name: "$(link_name "${name}" RealityXHTTP)"
+    type: vless
+    server: ${domain}
+    port: $(proto_get reality-xhttp .port)
+    uuid: ${uuid}
+    network: xhttp
+    udp: true
+    tls: true
+    servername: ${domain}
+    alpn: [h2]
+    client-fingerprint: chrome
+    xhttp-opts:
+      path: $(proto_get reality-xhttp .path)
+      host: ${domain}
+      mode: auto
+    reality-opts:
+      public-key: $(proto_get reality-xhttp .publicKey)
+      short-id: $(proto_get reality-xhttp .shortId)
+      support-x25519mlkem768: true
+EOF
+}

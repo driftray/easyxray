@@ -231,6 +231,9 @@ cmd_sub() {
         ui_rule
         ui_row "订阅地址"
         ui_row "${C_GREEN}${url}${C_RESET}"
+        ui_blank
+        ui_row "mihomo 订阅地址（Clash Verge、FlClash 等）"
+        ui_row "${C_GREEN}${url}/mihomo${C_RESET}"
         ui_bottom
         command -v qrencode >/dev/null 2>&1 && qrencode -t ANSIUTF8 -m 2 "${url}"
         ui_top
