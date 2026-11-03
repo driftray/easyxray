@@ -218,8 +218,9 @@ sudo ezx sub
 |---|---|---|---|
 | Shadowrocket | iOS、iPadOS、macOS（Apple 芯片） | [App Store](https://apps.apple.com/us/app/shadowrocket/id932747118)（付费，需非中国大陆区账号） | 在「设置 → TCP」中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 `chrome140`、`safari26_3` |
 | v2rayN | Windows、macOS、Linux | [GitHub](https://github.com/2dust/v2rayN/releases) | 使用默认设置 |
+| FlClash | Windows、macOS、Linux、Android | [GitHub](https://github.com/chen08209/FlClash/releases) | 导入 mihomo 订阅地址。macOS 首次打开如果提示无法验证，在「系统设置 → 隐私与安全性」中选择「仍要打开」 |
 
-mihomo 内核的客户端（如 Clash Verge、FlClash）使用专用的 mihomo 订阅地址，配置已包含连接 Reality 需要的设置，mihomo v1.19.33 上 5 个协议均已测试通过。
+其他 mihomo 内核的客户端（如 Clash Verge）也使用专用的 mihomo 订阅地址，配置已包含连接 Reality 需要的设置，mihomo v1.19.33 上 5 个协议均已测试通过。
 
 sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.9.8 起 Reality 要求的 X25519MLKEM768（[SagerNet/sing-box#4520](https://github.com/SagerNet/sing-box/issues/4520)），sing-box v1.14.4 实测无法连接 Reality-Vision，Reality-XHTTP 依赖同样的握手，可以改用 Hysteria2、XHTTP-TLS 或 VLESS-TLS-Vision。
 
@@ -263,7 +264,7 @@ sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.
 显示每个用户的订阅地址、二维码和各协议的分享链接。每个用户的令牌不同，有两个订阅地址：
 
 - 通用订阅（Shadowrocket、v2rayN）：`https://你的域名/s/随机令牌`
-- mihomo 订阅（Clash Verge、FlClash 等）：`https://你的域名/s/随机令牌/mihomo`
+- mihomo 订阅（FlClash、Clash Verge 等）：`https://你的域名/s/随机令牌/mihomo`
 
 ### 2. 用户管理
 
