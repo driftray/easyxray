@@ -181,7 +181,7 @@ curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh |
 | `--email 邮箱` | 第一个用户的邮箱，不填时自动生成 `随机前缀@xray.fake` |
 | `--hy2-port 端口` | Hysteria2 的端口，不填时在 `16384-16402` 内随机选择 |
 | `--hy2-hop 起-止` | 打开 Hysteria2 端口跳跃，例如 `16384-16402` |
-| `--version 版本` | 安装指定版本，例如 `--version v0.2.0`，不填时安装最新版本 |
+| `--version 版本` | 安装指定版本，例如 `--version v0.6.0`，不填时安装最新版本 |
 | `--restore 备份文件` | 从备份恢复，见[从备份恢复](#从备份恢复) |
 | `--no-domain` | 无域名安装，见[无域名安装](#无域名安装) |
 | `--target 域名` | 无域名安装的伪装域名，不填时自动推荐 |
@@ -479,7 +479,7 @@ ezx geo update                        # 更新 geo 数据
 ezx geo auto off                      # 关闭 geo 数据自动更新（on 为开启）
 ezx mptcp on                          # 开启系统的 MPTCP（默认关闭，off 为关闭）
 ezx update                            # 更新 easyxray 到最新发布版本
-ezx update v0.2.0                     # 更新或换回指定版本
+ezx update v0.6.0                     # 更新或换回指定版本
 ezx xray version
 ezx xray use                          # 更新到 Xray 最新正式版（也可以写版本号）
 ezx log debug 30                      # 开启调试日志 30 分钟

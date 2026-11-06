@@ -9,7 +9,7 @@
 #   bash install.sh --domain box.example.com [--full] [--protocols a,b] [--port-range 8000-8100] [--email 邮箱]
 #   bash install.sh --no-domain [--target 伪装域名]     没有域名时：只装 Reality，借用第三方网站伪装
 #   curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh | bash -s -- --domain box.example.com
-# 安装指定版本：加上 --version v0.2.0
+# 安装指定版本：加上 --version v0.6.0
 # SPDX-License-Identifier: GPL-3.0
 set -o pipefail
 
