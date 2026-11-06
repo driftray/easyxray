@@ -69,7 +69,7 @@ Hysteria2 的端口、Salamander 混淆（默认关闭）和端口跳跃（默�
 ## 安装前准备
 
 1. **一台 VPS**：Debian 12+ 或 Ubuntu 22.04+，x86_64 或 arm64，可以使用 root，有独立的公网 IPv4。暂不支持：
-   - **NAT VPS**（多台共用一个公网 IPv4，只分配部分转发端口）：申请证书需要 80 端口，Reality-Vision 需要 443 端口。只有 443 端口时可以用[无域名安装](#无域名安装)。
+   - **NAT VPS**（多台共用一个公网 IPv4，只分配部分转发端口）：申请证书需要 80 端口，Reality-Vision 需要 443 端口。
    - **纯 IPv6 VPS**：GitHub 不支持 IPv6，无法下载 easyxray 和 Xray。
 2. **一个域名**：A 记录解析到这台 VPS 的公网 IP。没有域名时可以使用[无域名安装](#无域名安装)。
 3. **在云服务商的安全组中放行端口**：
@@ -148,7 +148,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 │ 2  完全安装
 │    全部 5 个协议
 │ 3  无域名安装
-│    不推荐，只在没有域名或 NAT 机器上使用
+│    不推荐，只在没有域名时使用
 │ 4  从备份恢复
 │    沿用备份里的用户、密钥和端口，客户端不用重新导入
 │ 0  退出
@@ -191,7 +191,7 @@ curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh |
 
 ### 无域名安装
 
-不推荐。只在没有域名，或 NAT 机器无法用 80 端口申请证书时使用（仍需要 443 端口）。只安装 Reality，借用第三方网站伪装，比使用自己的域名更容易被识别：
+不推荐，只在没有域名时使用。只安装 Reality，借用第三方网站伪装，比使用自己的域名更容易被识别：
 
 ```bash
 bash install.sh --no-domain                                  # 只装 Reality-Vision，自动推荐伪装域名

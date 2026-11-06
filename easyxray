@@ -20,7 +20,7 @@ easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
                                   首次安装。默认推荐安装（Reality-Vision + Hysteria2），--full 安装全部 5 个协议
                                   --hy2-port 指定 Hysteria2 端口（默认 16384-16402 内随机），--hy2-hop 同时打开端口跳跃
   install --no-domain [--target 伪装域名] [--full] [--address IP] [--email 邮箱]
-                                  无域名安装（不推荐，只在没有域名或 NAT 机器上使用）：只有 Reality，没有订阅地址
+                                  无域名安装（不推荐，只在没有域名时使用）：只有 Reality，没有订阅地址
   install --restore 备份文件      在新服务器上从备份恢复，沿用原来的用户、密钥和端口
   protocol list | enable 名称 [--port 端口] | disable 名称
   protocol set hysteria2 port 端口               修改 Hysteria2 端口
@@ -664,7 +664,7 @@ menu_install() {
     fi
     if [[ -z "${kept}" ]]; then
         ui_menu 3 "无域名安装" "" ""
-        ui_row "   ${C_DIM}不推荐，只在没有域名或 NAT 机器上使用${C_RESET}"
+        ui_row "   ${C_DIM}不推荐，只在没有域名时使用${C_RESET}"
         ui_menu 4 "从备份恢复" "" ""
         ui_row "   ${C_DIM}沿用备份里的用户、密钥和端口，客户端不用重新导入${C_RESET}"
     fi
@@ -735,7 +735,7 @@ menu_install_nodomain() {
     ui_top
     ui_title "无域名安装"
     ui_rule
-    ui_row "不推荐：只在没有域名，或 NAT 机器无法申请证书时使用（仍需要 443 端口）"
+    ui_row "不推荐，只在没有域名时使用"
     ui_row "${C_DIM}只安装 Reality-Vision，借用第三方网站伪装，比用自己的域名更容易被识别${C_RESET}"
     ui_row "${C_DIM}没有订阅地址，需要逐条导入分享链接；改用域名需要重新安装${C_RESET}"
     ui_bottom
