@@ -8,7 +8,8 @@ port_in_use() {
     if command -v ss >/dev/null 2>&1; then
         [[ -n "$(ss -Hln "${flag}" "sport = :${port}" 2>/dev/null)" ]]
     elif command -v lsof >/dev/null 2>&1; then
-        lsof -nP -i "${proto}:${port}" 2>/dev/null | grep -qE 'LISTEN|UDP'
+        # 只算本机监听的端口；名称里带 -> 的是连到对方这个端口的连接
+        lsof -nP -i "${proto}:${port}" 2>/dev/null | awk 'NR > 1 && $9 !~ /->/ && ($0 ~ /LISTEN/ || $8 == "UDP") {found = 1} END {exit !found}'
     else
         return 1
     fi
