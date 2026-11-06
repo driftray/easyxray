@@ -121,13 +121,16 @@ install_site() {
     chmod -R a+rX "${EZ_WWW}"
 }
 
+# 无域名模式没有安装 Nginx
 nginx_test() {
     no_system && return 0
+    no_domain && return 0
     nginx -t >/dev/null 2>&1
 }
 
 nginx_reload() {
     no_system && return 0
+    no_domain && return 0
     systemctl enable nginx >/dev/null 2>&1
     if systemctl is-active nginx >/dev/null 2>&1; then
         systemctl reload nginx

@@ -1,5 +1,6 @@
 # shellcheck shell=bash
 # 备份与恢复：备份文件包含状态文件（用户、密钥、端口、分流规则）和伪装站点，不含证书（新服务器上重新申请）
+# 无域名模式恢复时重新获取新服务器的公网 IP
 # 恢复只能在没有安装过的服务器上进行，恢复后沿用原来的用户、密钥和端口，客户端不需要重新导入订阅
 
 ez_backup() {
@@ -25,7 +26,7 @@ restore_state() {
     state_exists && die "这台服务器上已经有 easyxray 的配置。恢复只能在全新的服务器上进行，或先运行 easyxray uninstall --purge"
     tmp=$(mktemp -d)
     tar -xzf "${file}" -C "${tmp}" --no-same-owner 2>/dev/null || { rm -rf "${tmp}"; die "备份文件损坏或格式不正确：${file}"; }
-    if ! jq -e '.domain and (.users | length > 0) and .protocols' "${tmp}/state.json" >/dev/null 2>&1; then
+    if ! jq -e '(.domain or .noDomain) and (.users | length > 0) and .protocols' "${tmp}/state.json" >/dev/null 2>&1; then
         rm -rf "${tmp}"
         die "备份文件里没有有效的配置：${file}"
     fi
@@ -39,6 +40,13 @@ restore_state() {
         cp -rp "${tmp}/site" "${EZ_WWW}/site"
     fi
     rm -rf "${tmp}"
-    info "已读取备份：域名 $(state_get .domain)，$(jq '.users | length' "${EZ_STATE}") 个用户"
-    info "请确认域名已经解析到这台服务器，否则无法申请证书"
+    if no_domain; then
+        info "已读取备份：无域名模式，$(jq '.users | length' "${EZ_STATE}") 个用户"
+        warn "备份里的节点地址是原服务器的 IP $(state_get .address)，新服务器的 IP 不同时，客户端需要重新导入节点"
+        # 新服务器上重新获取公网 IP
+        state_update 'del(.address)'
+    else
+        info "已读取备份：域名 $(state_get .domain)，$(jq '.users | length' "${EZ_STATE}") 个用户"
+        info "请确认域名已经解析到这台服务器，否则无法申请证书"
+    fi
 }

@@ -9,6 +9,14 @@
 # 按菜单顺序排列；推荐安装只装前两个
 EZ_PROTOCOLS=(reality-vision hysteria2 xhttp-tls reality-xhttp vless-tls-vision)
 EZ_PROTOCOLS_RECOMMENDED=(reality-vision hysteria2)
+# 无域名模式没有证书，只能用 Reality
+EZ_PROTOCOLS_NODOMAIN=(reality-vision reality-xhttp)
+
+# 当前模式下能否使用这个协议
+protocol_supported() {
+    no_domain || return 0
+    [[ " ${EZ_PROTOCOLS_NODOMAIN[*]} " == *" $1 "* ]]
+}
 
 proto_fn() { printf '%s_%s' "${1//-/_}" "$2"; }
 proto_call() {
@@ -31,6 +39,14 @@ proto_set() {
     local p=$1 obj=$2
     shift 2
     state_update ".protocols[\$p] = ((.protocols[\$p] // {}) + ${obj})" --arg p "${p}" "$@"
+}
+
+# Reality 的 SNI 和回落目标：有域名时是本机 Nginx 上的自有域名站点，无域名模式是第三方网站
+reality_sni() {
+    if no_domain; then state_get .realityTarget; else state_get .domain; fi
+}
+reality_dest() {
+    if no_domain; then printf '%s:443' "$(state_get .realityTarget)"; else printf '127.0.0.1:%s' "${EZ_REALITY_TARGET_PORT}"; fi
 }
 
 cert_file() { printf '%s/%s.crt' "${EZ_TLS}" "$(state_get '.domain')"; }

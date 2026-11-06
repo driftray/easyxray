@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# VLESS + Reality + XHTTP：和 Reality-Vision 共用回落站点，单独生成密钥和 shortId
+# VLESS + Reality + XHTTP：和 Reality-Vision 共用回落站点（无域名模式下是同一个第三方网站），单独生成密钥和 shortId
 # Shadowrocket 需要在 设置 → TCP 中选择支持 X25519MLKEM768 的较新 TLS 指纹（例如 chrome140）
 
 reality_xhttp_title() { printf 'Reality-XHTTP'; }
@@ -27,11 +27,10 @@ reality_xhttp_init() {
 
 reality_xhttp_inbound() {
     jq -n --argjson port "$(proto_get reality-xhttp .port)" \
-        --arg domain "$(state_get .domain)" \
+        --arg sni "$(reality_sni)" --arg dest "$(reality_dest)" \
         --arg priv "$(proto_get reality-xhttp .privateKey)" \
         --arg sid "$(proto_get reality-xhttp .shortId)" \
         --arg path "$(proto_get reality-xhttp .path)" \
-        --argjson target "${EZ_REALITY_TARGET_PORT}" \
         --argjson clients "$(vless_clients_json '')" \
         --argjson sniffing "$(sniffing_json)" '{
         tag: "reality-xhttp", port: $port, protocol: "vless",
@@ -39,43 +38,43 @@ reality_xhttp_inbound() {
         streamSettings: {
             network: "xhttp", security: "reality",
             realitySettings: {
-                target: ("127.0.0.1:" + ($target|tostring)), xver: 0,
-                serverNames: [$domain], privateKey: $priv, shortIds: [$sid]
+                target: $dest, xver: 0,
+                serverNames: [$sni], privateKey: $priv, shortIds: [$sid]
             },
-            xhttpSettings: {host: $domain, path: $path, mode: "auto"}
+            xhttpSettings: {host: $sni, path: $path, mode: "auto"}
         },
         sniffing: $sniffing
     }'
 }
 
 reality_xhttp_link() {
-    local uuid=$1 name=$2 domain
-    domain=$(state_get .domain)
+    local uuid=$1 name=$2 sni
+    sni=$(reality_sni)
     printf 'vless://%s@%s:%s?encryption=none&security=reality&type=xhttp&sni=%s&host=%s&alpn=h2&path=%s&mode=auto&pbk=%s&sid=%s#%s\n' \
-        "${uuid}" "${domain}" "$(proto_get reality-xhttp .port)" "${domain}" "${domain}" \
+        "${uuid}" "$(server_addr)" "$(proto_get reality-xhttp .port)" "${sni}" "${sni}" \
         "$(urlencode "$(proto_get reality-xhttp .path)")" \
         "$(proto_get reality-xhttp .publicKey)" "$(proto_get reality-xhttp .shortId)" \
         "$(urlencode "$(link_name "${name}" RealityXHTTP)")"
 }
 
 reality_xhttp_mihomo() {
-    local uuid=$1 name=$2 domain
-    domain=$(state_get .domain)
+    local uuid=$1 name=$2 sni
+    sni=$(reality_sni)
     cat <<EOF
   - name: "$(link_name "${name}" RealityXHTTP)"
     type: vless
-    server: ${domain}
+    server: $(server_addr)
     port: $(proto_get reality-xhttp .port)
     uuid: ${uuid}
     network: xhttp
     udp: true
     tls: true
-    servername: ${domain}
+    servername: ${sni}
     alpn: [h2]
     client-fingerprint: chrome
     xhttp-opts:
       path: $(proto_get reality-xhttp .path)
-      host: ${domain}
+      host: ${sni}
       mode: auto
     reality-opts:
       public-key: $(proto_get reality-xhttp .publicKey)

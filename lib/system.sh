@@ -26,8 +26,10 @@ install_packages() {
     info "安装软件包..."
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq || die "apt-get update 失败"
-    apt-get install -y -qq curl jq unzip openssl ca-certificates iproute2 nginx certbot logrotate qrencode >/dev/null ||
-        die "安装软件包失败"
+    # 无域名模式不需要 Nginx 和 certbot
+    local pkgs=(curl jq unzip openssl ca-certificates iproute2 logrotate qrencode)
+    [[ "${1:-}" == nodomain ]] || pkgs+=(nginx certbot)
+    apt-get install -y -qq "${pkgs[@]}" >/dev/null || die "安装软件包失败"
 }
 
 ensure_service_user() {
@@ -308,9 +310,9 @@ EOF
 
 # ---------- 防火墙：按需要的端口同步，规则带 easyxray 标记，多余的自动删除 ----------
 
-# 输出需要放行的端口：每行 "端口/协议"
+# 输出需要放行的端口：每行 "端口/协议"。80 端口用于申请证书，无域名模式不需要
 required_ports() {
-    printf '80/tcp\n'
+    no_domain || printf '80/tcp\n'
     local p
     while read -r p; do
         [[ -z "${p}" ]] && continue
@@ -318,7 +320,18 @@ required_ports() {
     done < <(enabled_protocols)
 }
 
+# 云服务商安全组需要放行的端口：除了 required_ports，还有端口跳跃的范围
+# （跳跃范围的数据包在进入系统防火墙之前已经转发到监听端口，系统防火墙只需要放行监听端口）
+cloud_ports() {
+    required_ports
+    local range
+    range=$(hop_range)
+    [[ -n "${range}" ]] && printf '%s/udp\n' "${range}"
+    return 0
+}
+
 sync_firewall() {
+    sync_hop
     no_system && return 0
     local need port proto rule
     need=$(required_ports | sort -u)
@@ -349,7 +362,86 @@ sync_firewall() {
     fi
 }
 
+# ---------- Hysteria2 端口跳跃：nftables 把范围内的 UDP 端口转发到监听端口 ----------
+# 规则放在单独的 inet easyxray_hop 表里，不影响系统的其他规则；开机由 easyxray-hop.service 重新加载
+
+EZ_HOP_NFT=${EZ_ETC}/hop.nft
+EZ_HOP_UNIT=/etc/systemd/system/easyxray-hop.service
+
+# 正在使用的跳跃范围：Hysteria2 开启且设置了范围时才有
+hop_range() {
+    protocol_enabled hysteria2 || return 0
+    proto_get hysteria2 .hopPorts
+}
+
+hop_rules() {
+    cat <<EOF
+# 由 easyxray 生成：Hysteria2 端口跳跃
+table inet easyxray_hop
+delete table inet easyxray_hop
+table inet easyxray_hop {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        udp dport $1 redirect to :$2
+    }
+}
+EOF
+}
+
+hop_remove() {
+    rm -f "${EZ_HOP_NFT}"
+    no_system && return 0
+    if [[ -f "${EZ_HOP_UNIT}" ]]; then
+        systemctl disable --now easyxray-hop >/dev/null 2>&1
+        rm -f "${EZ_HOP_UNIT}"
+        systemctl daemon-reload
+    fi
+    if command -v nft >/dev/null 2>&1 && nft list table inet easyxray_hop >/dev/null 2>&1; then
+        nft delete table inet easyxray_hop
+    fi
+}
+
+sync_hop() {
+    local range nft
+    range=$(hop_range)
+    if [[ -z "${range}" ]]; then
+        hop_remove
+        return 0
+    fi
+    hop_rules "${range}" "$(proto_get hysteria2 .port)" >"${EZ_HOP_NFT}"
+    no_system && return 0
+    if ! command -v nft >/dev/null 2>&1; then
+        info "安装 nftables（端口跳跃需要）..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nftables </dev/null >/dev/null 2>&1 ||
+            { err "安装 nftables 失败，端口跳跃没有生效"; return 1; }
+    fi
+    nft=$(command -v nft)
+    "${nft}" -c -f "${EZ_HOP_NFT}" || { err "端口跳跃规则有误，没有加载"; return 1; }
+    cat >"${EZ_HOP_UNIT}" <<EOF
+[Unit]
+Description=easyxray Hysteria2 port hopping
+After=network-pre.target
+Before=easyxray.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${nft} -f ${EZ_HOP_NFT}
+ExecStop=${nft} delete table inet easyxray_hop
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable easyxray-hop >/dev/null 2>&1
+    # 由服务加载规则：开机时也是同一个服务加载，状态一致
+    systemctl restart easyxray-hop || { err "加载端口跳跃规则失败（journalctl -u easyxray-hop 查看原因）"; return 1; }
+}
+
+hop_active() { command -v nft >/dev/null 2>&1 && nft list table inet easyxray_hop >/dev/null 2>&1; }
+
 remove_firewall_rules() {
+    hop_remove
     no_system && return 0
     local rule cmd
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then

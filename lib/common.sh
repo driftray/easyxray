@@ -21,7 +21,7 @@ EZ_NGINX_CONF=${EZ_ROOT}/etc/nginx/conf.d/easyxray.conf
 EZ_USER=easyxray
 
 # easyxray 自身的版本
-EZ_VERSION=0.6.0
+EZ_VERSION=0.7.0
 # 发布地址：更新时从这个仓库的 GitHub Release 下载
 EZ_REPO=driftray/easyxray
 
@@ -29,6 +29,8 @@ EZ_REPO=driftray/easyxray
 EZ_XRAY_MIN=v26.10.31
 # 除 Reality-Vision（固定 443）外，其他协议在这个范围里随机选空闲端口
 EZ_PORT_RANGE_DEFAULT=8000-8100
+# Hysteria2 默认端口和端口跳跃的范围：FaceTime 使用的 UDP 端口段，被限速或封锁的可能较小
+EZ_HY2_PORT_RANGE=16384-16402
 # 本机 Nginx：Reality 回落站点（TLS）和 VLESS-TLS-Vision 回落站点（明文），只监听 127.0.0.1
 EZ_REALITY_TARGET_PORT=31305
 EZ_VISION_FALLBACK_PORT=31306
@@ -113,6 +115,7 @@ state_update() {
     fi
 }
 
+# 无域名模式：domain 为空，Reality 借用第三方网站（realityTarget），节点地址用公网 IP（address）
 state_init() {
     local domain=$1
     mkdir -p "${EZ_ETC}"
@@ -130,6 +133,13 @@ state_init() {
         system: {}
     }' >"${EZ_STATE}"
     chmod 600 "${EZ_STATE}"
+}
+
+no_domain() { [[ "$(state_get .noDomain)" == "true" ]]; }
+
+# 客户端连接的地址：有域名时是域名，无域名模式是公网 IP
+server_addr() {
+    if no_domain; then state_get .address; else state_get .domain; fi
 }
 
 protocol_enabled() {

@@ -7,6 +7,7 @@
 #   wget -N https://raw.githubusercontent.com/driftray/easyxray/main/install.sh && bash install.sh
 # 非交互式安装（全程不提问）：
 #   bash install.sh --domain box.example.com [--full] [--protocols a,b] [--port-range 8000-8100] [--email 邮箱]
+#   bash install.sh --no-domain [--target 伪装域名]     没有域名时：只装 Reality，借用第三方网站伪装
 #   curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh | bash -s -- --domain box.example.com
 # 安装指定版本：加上 --version v0.2.0
 # SPDX-License-Identifier: GPL-3.0
@@ -26,11 +27,13 @@ fail() { printf '  %s✗%s %s\n' "${C_RED}" "${C_RESET}" "$*"; FAILED=1; }
 die() { printf '%s%s%s\n' "${C_RED}" "$*" "${C_RESET}" >&2; exit 1; }
 
 version=''
+nodomain=''
 args=()
 while (($#)); do
     case "$1" in
     --version) version=${2#v}; shift ;;
-    -h | --help) sed -n '2,11p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-domain) nodomain=1; args+=("$1") ;;
+    -h | --help) sed -n '2,12p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) args+=("$1") ;;
     esac
     shift
@@ -114,7 +117,7 @@ else
     fail "发现其他代理脚本或面板：${conflicts[*]}，请先卸载，避免端口和证书冲突"
 fi
 
-# 443 给 Reality-Vision；80 给 Nginx 申请证书（已有的 Nginx 占用 80 没关系）
+# 443 给 Reality-Vision；80 给 Nginx 申请证书（已有的 Nginx 占用 80 没关系，无域名安装不需要 80）
 owner() {
     local name
     name=$(ss -Hltnp "sport = :$1" 2>/dev/null | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/users:(("//; s/"$//')
@@ -126,7 +129,9 @@ if command -v ss >/dev/null 2>&1; then
     else
         fail "TCP 443 已被 $(owner 443) 占用，Reality-Vision 需要使用 443"
     fi
-    if [[ -z "$(ss -Hltn 'sport = :80' 2>/dev/null)" || "$(owner 80)" == "nginx" ]]; then
+    if [[ -n "${nodomain}" ]]; then
+        :
+    elif [[ -z "$(ss -Hltn 'sport = :80' 2>/dev/null)" || "$(owner 80)" == "nginx" ]]; then
         pass "TCP 80 可用（申请证书）"
     else
         fail "TCP 80 已被 $(owner 80) 占用，申请证书需要用 Nginx 监听 80"

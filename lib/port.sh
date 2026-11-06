@@ -30,10 +30,10 @@ port_assigned() {
     assigned_ports | grep -qx "$1"
 }
 
-# 在 portRange 内随机选一个空闲端口：$1=tcp|udp
+# 随机选一个空闲端口：$1=tcp|udp，$2=范围（默认 portRange）
 pick_random_port() {
-    local proto=$1 range low high port tries
-    range=$(state_get '.portRange')
+    local proto=$1 range=${2:-} low high port tries
+    [[ -z "${range}" ]] && range=$(state_get '.portRange')
     range=${range:-${EZ_PORT_RANGE_DEFAULT}}
     low=${range%-*}
     high=${range#*-}

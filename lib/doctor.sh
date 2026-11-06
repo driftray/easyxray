@@ -6,7 +6,7 @@ doc_warn() { printf '  %s注意%s   %s\n' "${C_YELLOW}" "${C_RESET}" "$*"; }
 doc_bad() { printf '  %s有问题%s %s\n' "${C_RED}" "${C_RESET}" "$*"; }
 
 ez_doctor() {
-    local v latest p port proto listener days level size need missing current fresh root
+    local v latest p port proto listener days level size need missing current fresh root result
     info "服务"
     if systemctl is-active easyxray >/dev/null 2>&1; then doc_ok "Xray 运行中"; else doc_bad "Xray 没有运行（journalctl -u easyxray 查看原因）"; fi
     v=$(xray_installed_version)
@@ -20,7 +20,9 @@ ez_doctor() {
     else
         doc_ok "Xray ${v}"
     fi
-    if systemctl is-active nginx >/dev/null 2>&1; then
+    if no_domain; then
+        doc_ok "无域名模式，不使用 Nginx"
+    elif systemctl is-active nginx >/dev/null 2>&1; then
         doc_ok "Nginx 运行中：$(nginx -v 2>&1 | sed -n 's#.*nginx/\([0-9.]*\).*#\1#p')，$(openssl version | awk '{print $1, $2}')"
     else
         doc_bad "Nginx 没有运行"
@@ -41,7 +43,17 @@ ez_doctor() {
             doc_bad "$(proto_call "${p}" title)  Xray 没有在本机 ${EZ_XHTTP_BACKEND_PORT} 端口监听"
         fi
     done < <(enabled_protocols)
-    doc_warn "云服务商的安全组需要放行：$(required_ports | sort -u | tr '\n' ' ')（从服务器内部无法检测）"
+    if protocol_enabled hysteria2; then
+        if hysteria2_obfs_on; then doc_ok "Hysteria2 混淆：开启"; else doc_ok "Hysteria2 混淆：关闭"; fi
+        if [[ -z "$(hop_range)" ]]; then
+            doc_ok "Hysteria2 端口跳跃：关闭"
+        elif hop_active; then
+            doc_ok "Hysteria2 端口跳跃：UDP $(hop_range) 转发到 $(proto_get hysteria2 .port)"
+        else
+            doc_bad "Hysteria2 端口跳跃已开启，但转发规则没有加载（运行 easyxray apply 修复）"
+        fi
+    fi
+    doc_warn "云服务商的安全组需要放行：$(cloud_ports | sort -u | tr '\n' ' ')（从服务器内部无法检测）"
 
     info "系统"
     if [[ ! -e /proc/sys/net/mptcp/enabled || "$(sysctl -n net.mptcp.enabled)" == "0" ]]; then
@@ -74,7 +86,14 @@ ez_doctor() {
         done <<<"${need}"
     fi
     if [[ -z "${missing}" ]]; then doc_ok "系统防火墙已放行所需端口"; else doc_bad "系统防火墙没有放行：${missing}（运行 easyxray apply 修复）"; fi
-    if [[ -s "$(cert_file)" ]]; then
+    if no_domain; then
+        result=$(target_probe_one "$(state_get .realityTarget)")
+        case "$(cut -f3 <<<"${result}")" in
+        ok) doc_ok "伪装域名 $(state_get .realityTarget) 可用，延迟 $(cut -f2 <<<"${result}") ms" ;;
+        ok:*) doc_warn "伪装域名 $(state_get .realityTarget)：$(cut -f3 <<<"${result}" | sed 's/^ok://')" ;;
+        *) doc_bad "伪装域名 $(state_get .realityTarget) 不可用：$(cut -f3 <<<"${result}")（ezx target probe 找一个新的）" ;;
+        esac
+    elif [[ -s "$(cert_file)" ]]; then
         days=$((($(date -d "$(openssl x509 -enddate -noout -in "$(cert_file)" | cut -d= -f2)" +%s) - $(date +%s)) / 86400))
         if ((days > 20)); then doc_ok "证书还有 ${days} 天到期（certbot 会自动续期）"; else doc_warn "证书还有 ${days} 天到期，请检查 certbot 自动续期（systemctl list-timers | grep certbot）"; fi
     else

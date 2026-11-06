@@ -68,7 +68,7 @@ ui_banner() {
     ui_blank
 }
 
-# 状态面板：域名、服务状态、用户数、WARP、各协议端口
+# 状态面板：域名（无域名模式为 IP 和伪装域名）、服务状态、用户数、WARP、各协议端口
 ui_dashboard() {
     local svc users warp p state line
     if no_system || systemctl is-active easyxray >/dev/null 2>&1; then
@@ -84,13 +84,19 @@ ui_dashboard() {
     fi
     ui_banner
     ui_rule
-    ui_row "${C_DIM}域名${C_RESET}   $(state_get .domain)"
+    if no_domain; then
+        ui_row "${C_DIM}地址${C_RESET}   $(state_get .address)    ${C_DIM}无域名模式，伪装域名${C_RESET} $(state_get .realityTarget)"
+    else
+        ui_row "${C_DIM}域名${C_RESET}   $(state_get .domain)"
+    fi
     ui_row "${C_DIM}状态${C_RESET}   ${svc}    用户 ${users}    ${warp}"
     ui_rule
     for p in "${EZ_PROTOCOLS[@]}"; do
         if protocol_enabled "${p}"; then
-            state="$(proto_call "${p}" transport | tr '[:lower:]' '[:upper:]') $(proto_get "${p}" .port)"
+            state="$(proto_call "${p}" transport | tr '[:lower:]' '[:upper:]') $(proto_get "${p}" .port)$(proto_note "${p}")"
             line="$(ui_status_dot on) $(pad "$(proto_call "${p}" title)" 20)${state}"
+        elif ! protocol_supported "${p}"; then
+            line="$(ui_status_dot off) ${C_DIM}$(pad "$(proto_call "${p}" title)" 20)需要域名${C_RESET}"
         else
             line="$(ui_status_dot off) ${C_DIM}$(pad "$(proto_call "${p}" title)" 20)未开启${C_RESET}"
         fi

@@ -87,7 +87,8 @@ ez_apply() {
 
     xray_config_json >"${tmp}/xray/config.json" || { rm -rf "${tmp}"; die "生成 Xray 配置失败"; }
     render_subscriptions "${tmp}/subscribe"
-    render_nginx_conf >"${tmp}/nginx.conf"
+    # 无域名模式不用 Nginx
+    no_domain || render_nginx_conf >"${tmp}/nginx.conf"
 
     if ! out=$(xray_test_dir "${tmp}/xray"); then
         err "Xray 配置校验失败，没有做任何修改："
@@ -100,8 +101,12 @@ ez_apply() {
     rm -rf "${EZ_XRAY_CONF}" "${EZ_SUB}"
     mv "${tmp}/xray" "${EZ_XRAY_CONF}"
     mv "${tmp}/subscribe" "${EZ_SUB}"
-    mkdir -p "$(dirname "${EZ_NGINX_CONF}")"
-    cp "${tmp}/nginx.conf" "${EZ_NGINX_CONF}"
+    if no_domain; then
+        rm -f "${EZ_NGINX_CONF}"
+    else
+        mkdir -p "$(dirname "${EZ_NGINX_CONF}")"
+        cp "${tmp}/nginx.conf" "${EZ_NGINX_CONF}"
+    fi
     rm -rf "${tmp}"
     fix_permissions
 

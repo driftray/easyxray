@@ -4,7 +4,7 @@
 set -o pipefail
 
 EZ_HOME=${EZ_HOME:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)}
-for f in common port protocol render users routing warp nginx system apply doctor update geo backup ui; do
+for f in common port protocol render users routing warp nginx system apply doctor update geo backup ui target; do
     # shellcheck source=/dev/null
     source "${EZ_HOME}/lib/${f}.sh"
 done
@@ -16,9 +16,18 @@ easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
 用法：easyxray [命令]（不带命令进入菜单）
 
   install --domain 域名 [--full] [--protocols a,b] [--port-range 8000-8100] [--email 邮箱]
+          [--hy2-port 端口] [--hy2-hop 范围]
                                   首次安装。默认推荐安装（Reality-Vision + Hysteria2），--full 安装全部 5 个协议
+                                  --hy2-port 指定 Hysteria2 端口（默认 16384-16402 内随机），--hy2-hop 同时打开端口跳跃
+  install --no-domain [--target 伪装域名] [--full] [--address IP] [--email 邮箱]
+                                  无域名安装：只有 Reality（--full 加上 Reality-XHTTP），没有订阅地址。
+                                  不填 --target 时从内置候选里探测并选用延迟最低的
   install --restore 备份文件      在新服务器上从备份恢复，沿用原来的用户、密钥和端口
   protocol list | enable 名称 [--port 端口] | disable 名称
+  protocol set hysteria2 port 端口               修改 Hysteria2 端口
+  protocol set hysteria2 obfs on|off            Hysteria2 混淆（默认关闭）
+  protocol set hysteria2 hop on [范围] | off     Hysteria2 端口跳跃（默认范围 16384-16402）
+  target probe [域名...] | set 域名 | show       无域名模式的伪装域名：探测可用性和延迟 / 更换 / 查看
   user list | add [邮箱] | del 邮箱  不填邮箱时生成 随机前缀@xray.fake
   sub [邮箱]                      显示订阅地址和分享链接
   route list | add 出口 规则 | del 出口 [规则] | quic block|allow | bt block|allow
@@ -74,10 +83,15 @@ link_commands() {
 }
 
 cmd_install() {
-    local domain='' full='' protocols='' range='' email='' restore='' xray_version p
+    local domain='' full='' protocols='' range='' email='' restore='' nodomain='' target='' address='' hy2_port='' hy2_hop='' xray_version p
     while (($#)); do
         case "$1" in
         --domain) domain=$2; shift ;;
+        --no-domain) nodomain=1 ;;
+        --target) target=$2; shift ;;
+        --address) address=$2; shift ;;
+        --hy2-port) hy2_port=$2; shift ;;
+        --hy2-hop) hy2_hop=$2; shift ;;
         --full) full=1 ;;
         --protocols) protocols=$2; shift ;;
         --port-range) range=$2; shift ;;
@@ -93,34 +107,65 @@ cmd_install() {
     fi
     # 从备份恢复：先把备份里的配置放好，后面按「沿用已有配置」安装
     [[ -n "${restore}" ]] && restore_state "${restore}"
-    # 保留配置卸载后重新安装时，域名可以不填
-    [[ -z "${domain}" ]] && state_exists && domain=$(state_get .domain)
-    [[ "${domain}" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "请用 --domain 指定域名，例如 --domain box.example.com"
+    # 保留的配置（或备份）是无域名模式时沿用
+    if state_exists && no_domain; then
+        [[ -z "${domain}" ]] || die "已有的配置是无域名模式；要改用域名，请先运行 easyxray uninstall --purge 删除原来的配置"
+        nodomain=1
+        [[ -z "${target}" ]] && target=$(state_get .realityTarget)
+        [[ -z "${address}" ]] && address=$(state_get .address)
+    fi
+    if [[ -n "${nodomain}" ]]; then
+        [[ -z "${domain}" ]] || die "--domain 和 --no-domain 只能选一个"
+    else
+        [[ -z "${target}" ]] || die "--target 只用于无域名安装（--no-domain）"
+        # 保留配置卸载后重新安装时，域名可以不填
+        [[ -z "${domain}" ]] && state_exists && domain=$(state_get .domain)
+        [[ "${domain}" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] ||
+            die "请用 --domain 指定域名，例如 --domain box.example.com；没有域名时用 --no-domain"
+    fi
     check_os
     check_legacy
-    info "证书由 Let's Encrypt 签发，安装即表示同意其服务条款：https://letsencrypt.org/repository/"
-    if [[ -n "${full}" ]]; then
+    [[ -n "${nodomain}" ]] || info "证书由 Let's Encrypt 签发，安装即表示同意其服务条款：https://letsencrypt.org/repository/"
+    if [[ -n "${full}" && -n "${nodomain}" ]]; then
+        protocols=$(IFS=,; echo "${EZ_PROTOCOLS_NODOMAIN[*]}")
+    elif [[ -n "${full}" ]]; then
         protocols=$(IFS=,; echo "${EZ_PROTOCOLS[*]}")
     elif [[ -z "${protocols}" ]] && state_exists && [[ -n "$(enabled_protocols)" ]]; then
         # 已有配置时沿用原来开启的协议
         protocols=$(enabled_protocols | paste -sd, -)
+    elif [[ -z "${protocols}" && -n "${nodomain}" ]]; then
+        protocols=reality-vision
     elif [[ -z "${protocols}" ]]; then
         protocols=$(IFS=,; echo "${EZ_PROTOCOLS_RECOMMENDED[*]}")
     fi
     [[ ",${protocols}," == *",reality-vision,"* ]] || die "Reality-Vision 必须安装（订阅和回落站点都依赖它）"
     IFS=, read -ra plist <<<"${protocols}"
-    for p in "${plist[@]}"; do valid_protocol "${p}"; done
+    for p in "${plist[@]}"; do
+        valid_protocol "${p}"
+        [[ -z "${nodomain}" || " ${EZ_PROTOCOLS_NODOMAIN[*]} " == *" ${p} "* ]] ||
+            die "无域名模式只能使用 Reality-Vision 和 Reality-XHTTP，$(proto_call "${p}" title) 需要域名证书"
+    done
+    if [[ -n "${hy2_port}${hy2_hop}" && ",${protocols}," != *",hysteria2,"* ]]; then
+        die "--hy2-port、--hy2-hop 需要同时安装 Hysteria2"
+    fi
+    [[ -z "${hy2_port}" || ( "${hy2_port}" =~ ^[0-9]+$ && "${hy2_port}" -ge 1 && "${hy2_port}" -le 65535 ) ]] ||
+        die "Hysteria2 端口不正确：${hy2_port}"
 
-    install_packages
+    install_packages ${nodomain:+nodomain}
     ensure_service_user
     mkdir -p "${EZ_ETC}" "${EZ_XRAY_CONF}" "${EZ_TLS}" "${EZ_SUB}" "${EZ_LOG}" "${EZ_SNAPSHOTS}"
     # 上次安装没有完成时沿用已经生成的密钥、端口和用户
     if state_exists; then
-        [[ "$(state_get .domain)" == "${domain}" ]] ||
-            die "已有的配置用的是域名 $(state_get .domain)，请用同一个域名；要换域名请先运行 easyxray uninstall --purge 删除原来的配置"
-        info "沿用已有的配置（域名 ${domain}）：用户、端口和密钥保持不变"
+        if [[ -n "${nodomain}" ]]; then
+            info "沿用已有的配置（无域名模式）：用户、端口和密钥保持不变"
+        else
+            [[ "$(state_get .domain)" == "${domain}" ]] ||
+                die "已有的配置用的是域名 $(state_get .domain)，请用同一个域名；要换域名请先运行 easyxray uninstall --purge 删除原来的配置"
+            info "沿用已有的配置（域名 ${domain}）：用户、端口和密钥保持不变"
+        fi
     else
         state_init "${domain}"
+        [[ -n "${nodomain}" ]] && state_update '.noDomain = true'
     fi
     [[ -n "${range}" ]] && state_update '.portRange = $r' --arg r "${range}"
     # 安装 Xray 最新正式版；测试模式下用 EZ_XRAY_BIN 指定的 xray
@@ -133,21 +178,28 @@ cmd_install() {
     install_xray "${xray_version}"
     state_update '.xray.version = $v' --arg v "${xray_version}"
 
-    # 先只开 80 端口申请证书
-    install_site
-    mkdir -p "$(dirname "${EZ_NGINX_CONF}")"
-    render_nginx_conf >"${EZ_NGINX_CONF}"
-    nginx_test || die "Nginx 配置有误，请检查 /etc/nginx 下是否有其他站点占用了 80 端口的同一域名"
-    nginx_reload
-    sync_firewall
-    check_dns
-    issue_cert
+    if [[ -n "${nodomain}" ]]; then
+        nodomain_setup "${target}" "${address}"
+    else
+        # 先只开 80 端口申请证书
+        install_site
+        mkdir -p "$(dirname "${EZ_NGINX_CONF}")"
+        render_nginx_conf >"${EZ_NGINX_CONF}"
+        nginx_test || die "Nginx 配置有误，请检查 /etc/nginx 下是否有其他站点占用了 80 端口的同一域名"
+        nginx_reload
+        sync_firewall
+        check_dns
+        issue_cert
+    fi
 
     enable_bbr
     disable_mptcp
     install_logrotate
     install_service
-    for p in "${plist[@]}"; do protocol_enable_state "${p}"; done
+    for p in "${plist[@]}"; do
+        if [[ "${p}" == hysteria2 ]]; then protocol_enable_state "${p}" "${hy2_port}"; else protocol_enable_state "${p}"; fi
+    done
+    [[ -n "${hy2_hop}" ]] && hysteria2_set_hop "${hy2_hop}"
     if [[ "$(jq '.users | length' "${EZ_STATE}")" -eq 0 ]]; then
         email=$(user_add_state "${email}")
     else
@@ -160,8 +212,31 @@ cmd_install() {
 
     ok "安装完成"
     cmd_protocol_list
-    warn "请在云服务商的安全组里放行：$(required_ports | sort -u | tr '\n' ' ')"
+    warn "请在云服务商的安全组里放行：$(cloud_ports | sort -u | tr '\n' ' ')"
     cmd_sub "${email}"
+}
+
+# 无域名安装：记录公网 IP 和伪装域名。没有指定伪装域名时探测内置候选，选延迟最低的
+nodomain_setup() {
+    local target=$1 address=$2 result
+    if [[ -z "${address}" ]]; then
+        no_system && die "测试模式下请用 --address 指定 IP"
+        address=$(public_ipv4)
+    fi
+    [[ "${address}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] ||
+        die "无法获取本机公网 IPv4，请用 --address 指定客户端连接的 IP"
+    if [[ -z "${target}" ]]; then
+        no_system && die "测试模式下请用 --target 指定伪装域名"
+        info "从本机探测候选伪装域名..."
+        result=$(target_probe "${EZ_TARGET_CANDIDATES[@]}")
+        target=$(target_best <<<"${result}")
+        target_probe_print "${target}" <<<"${result}"
+        [[ -n "${target}" ]] || die "候选域名都不可用，请用 --target 指定一个支持 TLS 1.3 和 HTTP/2 的网站"
+        info "使用推荐的伪装域名：${target}"
+    else
+        target_check "${target}"
+    fi
+    state_update '.address = $a | .realityTarget = $t' --arg a "${address}" --arg t "${target}"
 }
 
 # ---------- 协议 ----------
@@ -170,12 +245,24 @@ cmd_protocol_list() {
     local p state
     for p in "${EZ_PROTOCOLS[@]}"; do
         if protocol_enabled "${p}"; then
-            state="${C_GREEN}已开启${C_RESET}  $(proto_call "${p}" transport | tr a-z A-Z) $(proto_get "${p}" .port)"
+            state="${C_GREEN}已开启${C_RESET}  $(proto_call "${p}" transport | tr a-z A-Z) $(proto_get "${p}" .port)$(proto_note "${p}")"
+        elif ! protocol_supported "${p}"; then
+            state="${C_DIM}需要域名${C_RESET}"
         else
             state="未开启"
         fi
         printf '  %-18s %s\n' "$(proto_call "${p}" title)" "${state}"
     done
+}
+
+# 协议端口后面的附加说明，例如 Hysteria2 的混淆和端口跳跃
+proto_note() {
+    [[ "$1" == hysteria2 ]] || return 0
+    local note=''
+    hysteria2_obfs_on && note=混淆
+    [[ -n "$(hysteria2_hop_ports)" ]] && note+="${note:+，}跳跃 $(hysteria2_hop_ports)"
+    [[ -n "${note}" ]] && printf '（%s）' "${note}"
+    return 0
 }
 
 cmd_protocol() {
@@ -186,6 +273,7 @@ cmd_protocol() {
     list) cmd_protocol_list ;;
     enable)
         valid_protocol "${p}"
+        protocol_supported "${p}" || die "无域名模式不能使用 $(proto_call "${p}" title)（需要域名证书）"
         apply_change protocol_enable_state "${p}" "${port}" && ok "已开启 $(proto_call "${p}" title)，端口 $(proto_get "${p}" .port)"
         ;;
     disable)
@@ -193,7 +281,32 @@ cmd_protocol() {
         [[ "${p}" == "reality-vision" ]] && die "Reality-Vision 不能关闭（订阅和回落站点都依赖它）"
         apply_change proto_set "${p}" '{enabled: false}' && ok "已关闭 $(proto_call "${p}" title)"
         ;;
-    *) die "用法：easyxray protocol list | enable 名称 [--port 端口] | disable 名称" ;;
+    set)
+        [[ "${p}" == hysteria2 ]] || die "用法：easyxray protocol set hysteria2 obfs on|off | hop on [范围] | off"
+        cmd_hysteria2_set "${@:3}"
+        ;;
+    *) die "用法：easyxray protocol list | enable 名称 [--port 端口] | disable 名称 | set hysteria2 …" ;;
+    esac
+}
+
+cmd_hysteria2_set() {
+    local hint="客户端需要更新订阅（或重新导入 Hysteria2 节点）"
+    case "${1:-} ${2:-}" in
+    "port "*)
+        [[ -n "${2:-}" ]] || die "用法：easyxray protocol set hysteria2 port 端口"
+        apply_change hysteria2_set_port "$2" || return 1
+        ok "Hysteria2 端口已改为 $2。${hint}"
+        warn "请在云服务商的安全组里放行 UDP $2"
+        ;;
+    "obfs on") apply_change hysteria2_set_obfs on && ok "已打开 Hysteria2 混淆。${hint}" ;;
+    "obfs off") apply_change hysteria2_set_obfs off && ok "已关闭 Hysteria2 混淆。${hint}" ;;
+    "hop on")
+        apply_change hysteria2_set_hop "${3:-}" || return 1
+        ok "已打开 Hysteria2 端口跳跃：UDP $(hysteria2_hop_ports) 转发到 $(proto_get hysteria2 .port)。${hint}"
+        warn "请在云服务商的安全组里放行 UDP $(hysteria2_hop_ports)"
+        ;;
+    "hop off") apply_change hysteria2_set_hop off && ok "已关闭 Hysteria2 端口跳跃。${hint}" ;;
+    *) die "用法：easyxray protocol set hysteria2 port 端口 | obfs on|off | hop on [范围，默认 ${EZ_HY2_PORT_RANGE}] | hop off" ;;
     esac
 }
 
@@ -224,25 +337,33 @@ cmd_sub() {
     local email=${1:-} uuid token url link
     [[ -n "${email}" ]] && ! user_exists "${email}" && die "没有这个用户：${email}"
     while IFS=$'\t' read -r email uuid token; do
-        url="https://$(state_get .domain)/s/${token}"
         printf '\n'
         ui_top
         ui_title "${email}"
         ui_rule
-        ui_row "订阅地址"
-        ui_row "${C_GREEN}${url}${C_RESET}"
-        ui_blank
-        ui_row "mihomo 订阅地址（Clash Verge、FlClash 等）"
-        ui_row "${C_GREEN}${url}/mihomo${C_RESET}"
+        if no_domain; then
+            ui_row "无域名模式没有订阅地址，请把下面的分享链接导入客户端（可以扫二维码）"
+            ui_row "${C_DIM}mihomo 配置文件（FlClash、Clash Verge 等）：${EZ_SUB}/${token}.yaml${C_RESET}"
+        else
+            url="https://$(state_get .domain)/s/${token}"
+            ui_row "订阅地址"
+            ui_row "${C_GREEN}${url}${C_RESET}"
+            ui_blank
+            ui_row "mihomo 订阅地址（FlClash、Clash Verge 等）"
+            ui_row "${C_GREEN}${url}/mihomo${C_RESET}"
+        fi
         ui_bottom
-        command -v qrencode >/dev/null 2>&1 && qrencode -t ANSIUTF8 -m 2 "${url}"
+        no_domain || { command -v qrencode >/dev/null 2>&1 && qrencode -t ANSIUTF8 -m 2 "${url}"; }
         ui_top
-        ui_row "单条分享链接（也可以单独复制导入）"
+        if no_domain; then ui_row "分享链接"; else ui_row "单条分享链接（也可以单独复制导入）"; fi
         ui_rule
         while read -r link; do
             ui_row "${C_CYAN}$(urldecode_name "${link}")${C_RESET}"
             ui_row "${C_DIM}${link}${C_RESET}"
             ui_blank
+            if no_domain && command -v qrencode >/dev/null 2>&1; then
+                qrencode -t ANSIUTF8 -m 2 "${link}"
+            fi
         done < <(user_links "${uuid}" "${email}")
         ui_bottom
     done < <(jq -r --arg e "${email}" '.users[] | select($e == "" or .email == $e) | [.email, .uuid, .subToken] | @tsv' "${EZ_STATE}")
@@ -250,6 +371,40 @@ cmd_sub() {
     warn "Shadowrocket：请在 设置 → TCP 中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 chrome140、safari26_3"
     protocol_enabled hysteria2 && warn "Hysteria2：请在客户端里按自己宽带的实际速度填写上行/下行带宽"
     return 0
+}
+
+# ---------- 伪装域名（无域名模式） ----------
+
+cmd_target() {
+    case "${1:-show}" in
+    show)
+        need_installed
+        if no_domain; then
+            printf '伪装域名：%s    节点地址：%s\n' "$(state_get .realityTarget)" "$(state_get .address)"
+        else
+            printf '使用自有域名 %s，不需要伪装域名\n' "$(state_get .domain)"
+        fi
+        ;;
+    probe)
+        shift
+        (($# > 0)) || set -- "${EZ_TARGET_CANDIDATES[@]}"
+        local d
+        for d in "$@"; do valid_target "${d}" || die "域名格式不正确：${d}"; done
+        info "从本机探测（TLS 1.3、HTTP/2、X25519、是否在 Cloudflare 后面，延迟为建立 TCP 连接的时间）..."
+        local result
+        result=$(target_probe "$@")
+        target_probe_print "$(target_best <<<"${result}")" <<<"${result}"
+        ;;
+    set)
+        need_installed
+        no_domain || die "只有无域名模式需要伪装域名"
+        [[ -n "${2:-}" ]] || die "用法：easyxray target set 域名"
+        target_check "$2"
+        apply_change state_update '.realityTarget = $t' --arg t "$2" || return 1
+        ok "伪装域名已换成 $2。分享链接里的 SNI 变了，客户端需要重新导入节点"
+        ;;
+    *) die "用法：easyxray target probe [域名...] | set 域名 | show" ;;
+    esac
 }
 
 # ---------- 分流与 WARP ----------
@@ -483,11 +638,13 @@ cmd_uninstall() {
 
 menu_install() {
     local kept=''
-    state_exists && kept=$(state_get .domain)
+    if state_exists; then
+        if no_domain; then kept="无域名模式（伪装域名 $(state_get .realityTarget)）"; else kept="域名 $(state_get .domain)"; fi
+    fi
     ui_banner
     ui_rule
     if [[ -n "${kept}" ]]; then
-        ui_row "检测到保留的配置：域名 ${kept}，$(jq '.users | length' "${EZ_STATE}") 个用户"
+        ui_row "检测到保留的配置：${kept}，$(jq '.users | length' "${EZ_STATE}") 个用户"
         ui_row "${C_DIM}重新安装会沿用原来的用户、端口和密钥，客户端不用重新导入${C_RESET}"
     else
         ui_row "${C_DIM}还没有安装，请选择安装方式：${C_RESET}"
@@ -501,9 +658,15 @@ menu_install() {
         ui_row "   ${C_DIM}Reality-Vision + Hysteria2，暴露的端口最少${C_RESET}"
     fi
     ui_menu 2 "完全安装" "" ""
-    ui_row "   ${C_DIM}全部 5 个协议${C_RESET}"
+    if [[ "${kept}" == 无域名* ]]; then
+        ui_row "   ${C_DIM}Reality-Vision + Reality-XHTTP${C_RESET}"
+    else
+        ui_row "   ${C_DIM}全部 5 个协议${C_RESET}"
+    fi
     if [[ -z "${kept}" ]]; then
-        ui_menu 3 "从备份恢复" "" ""
+        ui_menu 3 "无域名安装" "" ""
+        ui_row "   ${C_DIM}没有域名时使用：只有 Reality，借用第三方网站伪装，没有订阅地址${C_RESET}"
+        ui_menu 4 "从备份恢复" "" ""
         ui_row "   ${C_DIM}沿用备份里的用户、密钥和端口，客户端不用重新导入${C_RESET}"
     fi
     ui_menu 0 "退出" "" ""
@@ -513,19 +676,25 @@ menu_install() {
     case "${choice}" in
     1 | 2)
         if [[ -n "${kept}" ]]; then
-            domain=${kept}
+            # 域名或无域名模式都从保留的配置里读取
+            if [[ "${choice}" == "2" ]]; then (cmd_install --full); else (cmd_install); fi
         else
             domain=$(ui_ask "域名（已解析到本机，例如 box.example.com）：")
             email=$(ui_ask "第一个用户的邮箱（直接回车自动生成）：")
-        fi
-        if [[ "${choice}" == "2" ]]; then
-            (cmd_install --domain "${domain}" --full ${email:+--email "${email}"})
-        else
-            (cmd_install --domain "${domain}" ${email:+--email "${email}"})
+            if [[ "${choice}" == "2" ]]; then
+                (cmd_install --domain "${domain}" --full ${email:+--email "${email}"})
+            else
+                (cmd_install --domain "${domain}" ${email:+--email "${email}"})
+            fi
         fi
         ui_pause
         ;;
     3)
+        [[ -z "${kept}" ]] || return 1
+        menu_install_nodomain
+        ui_pause
+        ;;
+    4)
         [[ -z "${kept}" ]] || return 1
         local file
         file=$(ui_ask "备份文件路径（例如 /root/easyxray-backup-20261027-120000.tar.gz）：")
@@ -534,6 +703,46 @@ menu_install() {
         ;;
     *) return 1 ;;
     esac
+}
+
+# 探测候选伪装域名并让用户选择，结果放在 EZ_PICKED_TARGET；回车选推荐，也可以直接输入其他域名
+pick_target() {
+    local result choice names=()
+    EZ_PICKED_TARGET=''
+    info "从本机探测候选伪装域名..."
+    local best
+    result=$(target_probe "${EZ_TARGET_CANDIDATES[@]}")
+    best=$(target_best <<<"${result}")
+    mapfile -t names < <(cut -f1 <<<"${result}")
+    target_probe_print "${best}" numbered <<<"${result}"
+    choice=$(ui_ask "选择编号，或输入其他域名（直接回车用推荐的）：")
+    choice=${choice// /}
+    if [[ -z "${choice}" ]]; then
+        EZ_PICKED_TARGET=${best}
+        [[ -n "${EZ_PICKED_TARGET}" ]] || { warn "候选域名都不可用，请输入其他域名"; return 1; }
+    elif [[ "${choice}" =~ ^[0-9]+$ ]]; then
+        ((choice >= 1 && choice <= ${#names[@]})) || { warn "编号不正确：${choice}"; return 1; }
+        [[ "$(sed -n "${choice}p" <<<"${result}" | cut -f3)" == ok* ]] || { warn "${names[$((choice - 1))]} 不可用"; return 1; }
+        EZ_PICKED_TARGET=${names[$((choice - 1))]}
+    else
+        valid_target "${choice}" || { warn "域名格式不正确：${choice}"; return 1; }
+        EZ_PICKED_TARGET=${choice}
+    fi
+}
+
+menu_install_nodomain() {
+    local email
+    printf '\n'
+    ui_top
+    ui_title "无域名安装"
+    ui_rule
+    ui_row "只安装 Reality-Vision（TCP 443），借用第三方网站的证书伪装"
+    ui_row "${C_DIM}和用自己的域名相比：域名不解析到本机、伪装网站不在本机，更容易被识别${C_RESET}"
+    ui_row "${C_DIM}没有订阅地址，用户需要逐条导入分享链接；以后加了域名需要重新安装${C_RESET}"
+    ui_bottom
+    pick_target || return 0
+    email=$(ui_ask "第一个用户的邮箱（直接回车自动生成）：")
+    (cmd_install --no-domain --target "${EZ_PICKED_TARGET}" ${email:+--email "${email}"})
 }
 
 # 让用户从编号列表里选一项，输出选中的序号（从 0 开始）；回车或 0 返回空
@@ -593,34 +802,89 @@ menu_users() {
 }
 
 menu_protocols() {
-    local p i=1 idx
+    local p i=1 idx count=6
     printf '\n'
     ui_top
     ui_title "协议管理"
     ui_rule
     for p in "${EZ_PROTOCOLS[@]}"; do
         if protocol_enabled "${p}"; then
-            ui_row "${C_CYAN}${i}${C_RESET}  $(ui_status_dot on) $(pad "$(proto_call "${p}" title)" 20)$(proto_call "${p}" transport | tr '[:lower:]' '[:upper:]') $(proto_get "${p}" .port)"
+            ui_row "${C_CYAN}${i}${C_RESET}  $(ui_status_dot on) $(pad "$(proto_call "${p}" title)" 20)$(proto_call "${p}" transport | tr '[:lower:]' '[:upper:]') $(proto_get "${p}" .port)$(proto_note "${p}")"
+        elif ! protocol_supported "${p}"; then
+            ui_row "${C_CYAN}${i}${C_RESET}  $(ui_status_dot off) ${C_DIM}$(pad "$(proto_call "${p}" title)" 20)需要域名${C_RESET}"
         else
             ui_row "${C_CYAN}${i}${C_RESET}  $(ui_status_dot off) ${C_DIM}$(pad "$(proto_call "${p}" title)" 20)未开启${C_RESET}"
         fi
         i=$((i + 1))
     done
     ui_row "${C_CYAN}6${C_RESET}  重新生成所有协议的密钥"
+    if no_domain; then
+        ui_row "${C_CYAN}7${C_RESET}  更换伪装域名（当前 $(state_get .realityTarget)）"
+        count=7
+    fi
     ui_row "${C_CYAN}0${C_RESET}  返回"
     ui_rule
-    ui_row "${C_DIM}选择 1-5 切换开启/关闭；Reality-Vision 不能关闭${C_RESET}"
+    ui_row "${C_DIM}选择 1-5 切换开启/关闭；Reality-Vision 不能关闭；Hysteria2 开启后可以设置混淆和端口跳跃${C_RESET}"
     ui_row "${C_DIM}怀疑分享链接泄露时可以重新生成密钥，客户端更新订阅即可${C_RESET}"
     ui_bottom
-    idx=$(pick_one "请选择：" 6) || return 0
+    idx=$(pick_one "请选择：" "${count}") || return 0
     if ((idx == 5)); then
         confirm "重新生成后旧的分享链接全部失效，所有客户端都要更新订阅，确认" || return 0
         (cmd_rekey)
         ui_pause
         return 0
     fi
+    if ((idx == 6)); then
+        pick_target && (cmd_target set "${EZ_PICKED_TARGET}")
+        ui_pause
+        return 0
+    fi
     p=${EZ_PROTOCOLS[$idx]}
+    if [[ "${p}" == hysteria2 ]] && protocol_enabled hysteria2; then
+        menu_hysteria2
+        return 0
+    fi
     if protocol_enabled "${p}"; then (cmd_protocol disable "${p}"); else (cmd_protocol enable "${p}"); fi
+    ui_pause
+}
+
+menu_hysteria2() {
+    local hop
+    hop=$(hysteria2_hop_ports)
+    printf '\n'
+    ui_top
+    ui_title "Hysteria2  UDP $(proto_get hysteria2 .port)"
+    ui_rule
+    ui_row "混淆       $(hysteria2_obfs_on && echo "${C_GREEN}开${C_RESET}" || echo 关)"
+    ui_row "端口跳跃   ${hop:-关}"
+    ui_rule
+    ui_menu 1 "$(hysteria2_obfs_on && echo 关闭 || echo 打开)混淆" 2 "$([[ -n "${hop}" ]] && echo 关闭 || echo 打开)端口跳跃"
+    ui_menu 3 "修改端口" 4 "关闭 Hysteria2"
+    ui_menu 0 "返回" "" ""
+    ui_rule
+    ui_row "${C_DIM}混淆：隐藏 QUIC 特征，可绕过针对 QUIC 的限速，但不再像 HTTP/3，也更耗 CPU${C_RESET}"
+    ui_row "${C_DIM}端口跳跃：客户端定时换端口连接，需要在安全组放行 UDP ${hop:-${EZ_HY2_PORT_RANGE}}${C_RESET}"
+    ui_row "${C_DIM}改动后客户端需要更新订阅${C_RESET}"
+    ui_bottom
+    case "$(ui_ask "请选择：")" in
+    1) if hysteria2_obfs_on; then (cmd_hysteria2_set obfs off); else (cmd_hysteria2_set obfs on); fi ;;
+    2)
+        if [[ -n "${hop}" ]]; then
+            (cmd_hysteria2_set hop off)
+        else
+            hop=$(ui_ask "端口范围（直接回车用 ${EZ_HY2_PORT_RANGE}）：")
+            (cmd_hysteria2_set hop on ${hop:+"${hop}"})
+        fi
+        ;;
+    3)
+        local port
+        port=$(ui_ask "新端口（建议 ${EZ_HY2_PORT_RANGE} 内，回车返回）：")
+        [[ -n "${port}" ]] || return 0
+        (cmd_hysteria2_set port "${port}")
+        ;;
+    4) (cmd_protocol disable hysteria2) ;;
+    *) return 0 ;;
+    esac
     ui_pause
 }
 
@@ -813,7 +1077,7 @@ menu() {
         fi
         ui_dashboard
         ui_rule
-        ui_menu 1 "查看订阅" 2 "用户管理"
+        ui_menu 1 "$(no_domain && echo 查看分享链接 || echo 查看订阅)" 2 "用户管理"
         ui_menu 3 "协议管理" 4 "分流与屏蔽管理"
         ui_menu 5 "诊断" 6 "版本更新"
         ui_menu 7 "调试日志" 8 "备份与回滚"
@@ -857,6 +1121,7 @@ main() {
     geo) cmd_geo "$@" ;;
     mptcp) cmd_mptcp "$@" ;;
     rekey) cmd_rekey "$@" ;;
+    target) cmd_target "$@" ;;
     backup) need_installed; ez_backup "$@" ;;
     apply) require_root; need_installed; ensure_security; install_service; ez_apply && ok "配置已更新" ;;
     rollback) require_root; need_installed; ez_rollback ;;

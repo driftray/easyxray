@@ -36,7 +36,8 @@ check "完全安装后有 5 个入站" cfg '.inbounds | length == 5'
 check "Xray 配置校验通过" xray_ok
 check "状态文件记录了安装的 Xray 版本" jq -e --arg v "v$("${XRAY}" version | awk 'NR==1{print $2}')" '.xray.version == $v' "${R}/etc/easyxray/state.json"
 check "Reality-Vision 在 443" cfg '.inbounds[] | select(.tag == "reality-vision") | .port == 443'
-check "其他协议端口在 8000~8100" jq -e '[.protocols | to_entries[] | select(.key != "reality-vision") | .value.port] | all(. >= 8000 and . <= 8100)' "${R}/etc/easyxray/state.json"
+check "Hysteria2 端口在 16384~16402" jq -e '.protocols.hysteria2.port | . >= 16384 and . <= 16402' "${R}/etc/easyxray/state.json"
+check "其他协议端口在 8000~8100" jq -e '[.protocols | to_entries[] | select(.key != "reality-vision" and .key != "hysteria2") | .value.port] | all(. >= 8000 and . <= 8100)' "${R}/etc/easyxray/state.json"
 N="${R}/etc/nginx/conf.d/easyxray.conf"
 xport=$(jq -r '.protocols["xhttp-tls"].port' "${R}/etc/easyxray/state.json")
 xpath=$(jq -r '.protocols["xhttp-tls"].path' "${R}/etc/easyxray/state.json")
@@ -103,6 +104,42 @@ x protocol disable vless-tls-vision >/dev/null 2>&1
 check "关闭后少一个入站" cfg '.inbounds | length == 4'
 x protocol enable vless-tls-vision >/dev/null 2>&1
 check "重新开启后沿用原端口" cfg ".inbounds[] | select(.tag == \"vless-tls-vision\") | .port == ${port_before}"
+
+echo "Hysteria2 设置"
+S="${R}/etc/easyxray/state.json"
+hy() { cfg ".inbounds[] | select(.tag == \"hysteria2\") | $1"; }
+links() { base64 -d <"$(ls "${R}"/etc/easyxray/subscribe/* | grep -v yaml | head -1)"; }
+mihomo() { cat "$(ls "${R}"/etc/easyxray/subscribe/*.yaml | head -1)"; }
+export R
+export -f links mihomo
+check "新安装默认不混淆" hy '.streamSettings | has("finalmask") | not'
+check "不混淆时链接和 mihomo 配置里没有混淆参数" bash -c "! (links; mihomo) | grep -q obfs"
+x protocol set hysteria2 obfs on >/dev/null 2>&1
+check "打开混淆后入站有 Salamander" hy '.streamSettings.finalmask.udp[0].type == "salamander"'
+check "打开混淆后链接和 mihomo 配置带混淆密码" bash -c "pw=\$(jq -r .protocols.hysteria2.obfsPassword ${S}); links | grep -q \"obfs=salamander&obfs-password=\${pw}\" && mihomo | grep -q \"obfs-password: \${pw}\""
+check "打开混淆后配置有效" xray_ok
+jq 'del(.protocols.hysteria2.obfs)' "${S}" >"${R}/s.tmp" && cat "${R}/s.tmp" >"${S}"
+x apply >/dev/null 2>&1
+check "旧版本状态文件（有混淆密码、没有 obfs）升级后保持混淆" hy '.streamSettings.finalmask.udp[0].type == "salamander"'
+x protocol set hysteria2 obfs off >/dev/null 2>&1
+check "关闭混淆" hy '.streamSettings | has("finalmask") | not'
+hport=$(jq -r .protocols.hysteria2.port "${S}")
+x protocol set hysteria2 hop on >/dev/null 2>&1
+check "端口跳跃默认范围 16384-16402" jq -e '.protocols.hysteria2.hopPorts == "16384-16402"' "${S}"
+check "端口跳跃链接带 mport，mihomo 配置带 ports" bash -c "links | grep -q 'mport=16384-16402' && mihomo | grep -q 'ports: 16384-16402'"
+check "生成 nftables 转发规则" grep -q "udp dport 16384-16402 redirect to :${hport}" "${R}/etc/easyxray/hop.nft"
+check "范围不正确时拒绝" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 hop on 100-200 && ! bash ${HERE}/easyxray protocol set hysteria2 hop on 20000-30000"
+check "拒绝后范围不变" jq -e '.protocols.hysteria2.hopPorts == "16384-16402"' "${S}"
+x rekey hysteria2 >/dev/null 2>&1
+check "重新生成密钥后保留混淆和端口跳跃设置" jq -e '.protocols.hysteria2 | .obfs == false and .hopPorts == "16384-16402"' "${S}"
+x protocol set hysteria2 hop off >/dev/null 2>&1
+check "关闭端口跳跃后删除规则和 mport" bash -c "[[ ! -e ${R}/etc/easyxray/hop.nft ]] && ! links | grep -q mport"
+check "Hysteria2 只有自己有可调整的设置" bash -c "! bash ${HERE}/easyxray protocol set xhttp-tls obfs on"
+x protocol set hysteria2 port 16400 >/dev/null 2>&1
+check "修改 Hysteria2 端口" hy '.port == 16400'
+check "端口已分配给其他协议时拒绝" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 port 443"
+check "端口不正确时拒绝" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 port 70000"
+check "改端口后其他设置不变" jq -e '.protocols.hysteria2 | .port == 16400 and .obfs == false and (has("hopPorts") | not)' "${S}"
 
 echo "apply 与回滚"
 before=$(jq -S . "${C}")
@@ -209,6 +246,42 @@ x install --restore "${R}/bk.tar.gz" >/dev/null 2>&1
 jq -S '{users, protocols, routing}' "${S}" >"${R}/bk.after"
 check "恢复后用户、密钥、端口和规则与备份时一致" cmp -s "${R}/bk.before" "${R}/bk.after"
 check "恢复后标记为已安装、配置有效" bash -c "jq -e '.system.installed == true' ${S} >/dev/null && XRAY_LOCATION_ASSET=$(dirname "${XRAY}") ${XRAY} run -test -confdir ${R}/etc/easyxray/xray >/dev/null"
+
+echo "安装时设置 Hysteria2"
+echo y | x uninstall --purge >/dev/null 2>&1
+mkdir -p "${R}/etc/easyxray/tls"
+cp "${R}/cert.crt" "${R}/etc/easyxray/tls/test.example.com.crt" && cp "${R}/cert.key" "${R}/etc/easyxray/tls/test.example.com.key"
+check "没装 Hysteria2 时不能用 --hy2-port" bash -c "! bash ${HERE}/easyxray install --domain test.example.com --protocols reality-vision --hy2-port 20000"
+x install --domain test.example.com --hy2-port 20000 --hy2-hop 20000-20050 >/dev/null 2>&1
+check "安装时指定 Hysteria2 端口和跳跃范围" bash -c "jq -e '.protocols.hysteria2 | .port == 20000 and .hopPorts == \"20000-20050\"' ${S} >/dev/null && grep -q 'udp dport 20000-20050 redirect to :20000' ${R}/etc/easyxray/hop.nft"
+check "安装时指定后配置有效" xray_ok
+
+echo "无域名模式"
+echo y | x uninstall --purge >/dev/null 2>&1
+check "--domain 和 --no-domain 不能同时使用" bash -c "! bash ${HERE}/easyxray install --no-domain --domain test.example.com --target www.example.com --address 192.0.2.10"
+x install --no-domain --target www.example.com --address 192.0.2.10 >/dev/null 2>&1
+check "无域名安装只有 Reality-Vision" cfg '[.inbounds[].tag] == ["reality-vision"]'
+check "Reality 回落到伪装域名" cfg '.inbounds[0].streamSettings.realitySettings | .target == "www.example.com:443" and .serverNames == ["www.example.com"]'
+check "无域名安装配置有效" xray_ok
+check "不生成 Nginx 配置" test ! -e "${R}/etc/nginx/conf.d/easyxray.conf"
+check "链接用 IP 连接、SNI 是伪装域名" bash -c "links | grep -q '@192.0.2.10:443?encryption=none&security=reality&type=tcp&sni=www.example.com&'"
+check "mihomo 配置用 IP 和伪装域名" bash -c "mihomo | grep -q 'server: 192.0.2.10' && mihomo | grep -q 'servername: www.example.com'"
+check "无域名模式不能开启需要证书的协议" bash -c "! bash ${HERE}/easyxray protocol enable hysteria2 && ! bash ${HERE}/easyxray protocol enable xhttp-tls"
+x protocol enable reality-xhttp >/dev/null 2>&1
+check "可以开启 Reality-XHTTP，Host 是伪装域名" cfg '.inbounds[] | select(.tag == "reality-xhttp") | .streamSettings.xhttpSettings.host == "www.example.com" and .streamSettings.realitySettings.target == "www.example.com:443"'
+x target set www.example.org >/dev/null 2>&1
+check "更换伪装域名后两个入站都更新" cfg '[.inbounds[].streamSettings.realitySettings.serverNames[0]] | all(. == "www.example.org")'
+check "伪装域名格式不正确时拒绝" bash -c "! bash ${HERE}/easyxray target set 'not a domain'"
+x backup "${R}/nd.tar.gz" >/dev/null 2>&1
+jq -S '{users, protocols, realityTarget}' "${S}" >"${R}/nd.before"
+echo y | x uninstall --keep-config >/dev/null 2>&1
+x install >/dev/null 2>&1
+jq -S '{users, protocols, realityTarget}' "${S}" >"${R}/nd.after"
+check "保留配置后重新安装仍是无域名模式，用户和密钥不变" bash -c "jq -e '.noDomain == true and .system.installed == true' ${S} >/dev/null && cmp -s ${R}/nd.before ${R}/nd.after"
+echo y | x uninstall --purge >/dev/null 2>&1
+x install --restore "${R}/nd.tar.gz" --address 192.0.2.20 >/dev/null 2>&1
+check "从备份恢复无域名配置，使用新服务器的 IP" bash -c "jq -e '.noDomain == true and .address == \"192.0.2.20\" and .realityTarget == \"www.example.org\"' ${S} >/dev/null && links | grep -q '@192.0.2.20:443'"
+check "恢复后配置有效" xray_ok
 
 printf '\n通过 %d，失败 %d\n' "${pass}" "${fail}"
 ((fail == 0))
