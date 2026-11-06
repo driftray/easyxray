@@ -115,7 +115,7 @@ hysteria2_set_hop() {
     for ((port = low; port <= high; port++)); do
         [[ "${port}" == "${self}" ]] && continue
         if port_in_use "${port}" udp; then
-            die "UDP ${port} 已被 $(port_owner "${port}" udp) 占用，不能用于端口跳跃，请换一个范围"
+            die "UDP ${port} 已被 $(port_owner_desc "${port}" udp) 占用，不能用于端口跳跃，请换一个范围"
         fi
     done
     while read -r p; do

@@ -21,6 +21,16 @@ port_owner() {
     ss -Hlnp "${flag}" "sport = :${port}" 2>/dev/null | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/users:(("//; s/"$//'
 }
 
+# 占用端口的程序，用于提示：程序名后面加上它所在的 systemd 服务，例如「xray（easyxray-test.service）」
+port_owner_desc() {
+    local port=$1 proto=$2 flag=-t name pid unit
+    [[ "${proto}" == "udp" ]] && flag=-u
+    name=$(port_owner "${port}" "${proto}")
+    pid=$(ss -Hlnp "${flag}" "sport = :${port}" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+    [[ -n "${pid}" ]] && unit=$(grep -oE '[^/]+\.service' "/proc/${pid}/cgroup" 2>/dev/null | head -1)
+    printf '%s%s' "${name:-其他程序}" "${unit:+（${unit}）}"
+}
+
 # 状态文件里已经分配给各协议的端口
 assigned_ports() {
     jq -r '[.protocols[]?.port // empty] | .[]' "${EZ_STATE}" 2>/dev/null
@@ -61,6 +71,6 @@ check_port_free() {
         owner=$(port_owner "${port}" "${proto}")
         # 端口被本程序占用（例如重新生成配置时，由 Xray 或 Nginx 监听），可以继续使用
         [[ "${current}" == "${port}" && ( "${owner}" == "xray" || "${owner}" == "nginx" ) ]] && return 0
-        die "${proto^^} ${port} 已被 ${owner:-其他程序} 占用。请先停止占用的程序，或换一个端口"
+        die "${proto^^} ${port} 已被 $(port_owner_desc "${port}" "${proto}") 占用。请先停止占用的程序，或换一个端口"
     fi
 }
