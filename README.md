@@ -49,7 +49,6 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 - **多用户**：用户以邮箱区分，每个用户有独立的订阅地址。
 - **WARP 分流**：一键开启 WARP，默认将 `geosite:cn`、`geoip:cn` 分流到 WARP。添加规则时直接写 `anthropic`、`openai` 等名称即可，会自动在 geosite 列表中查找。geo 数据每周自动更新。
 - **屏蔽 BT**：默认屏蔽 BT 下载，避免 VPS 收到版权投诉。
-- **没有域名也能用**：无域名安装只使用 Reality，借用第三方网站伪装；内置候选域名，安装时从服务器探测可用性和延迟后推荐。
 - **备份与迁移**：一条命令导出备份，在新服务器上恢复后沿用原来的用户和密钥，客户端不用重新导入。
 - **中文菜单**：所有操作都用数字选择，删除前需要确认。
 
@@ -63,17 +62,14 @@ easyxray 是一个用 Bash 编写的 Xray-core 服务器管理工具。一条命
 | 4 | VLESS + Reality + XHTTP | TCP | 随机 | | 备用 |
 | 5 | VLESS + TLS + Vision | TCP | 随机 | | 备用 |
 
-随机端口默认在 `8000-8100` 范围内选择空闲端口，选定后固定不变。Hysteria2 默认在 FaceTime 使用的 UDP 端口段 `16384-16402` 里选择，被限速或封锁的可能较小；从旧版本升级时端口不变。XHTTP-TLS 的端口由 Nginx 监听，XHTTP 路径转发给 Xray，其他路径返回伪装站点。
+随机端口默认在 `8000-8100` 范围内选择空闲端口（Hysteria2 在 `16384-16402` 内），选定后固定不变。XHTTP-TLS 的端口由 Nginx 监听，XHTTP 路径转发给 Xray，其他路径返回伪装站点。
 
-Hysteria2 的端口和下面两个设置都可以在「协议管理」里选择 Hysteria2 修改，新安装时也可以用 `--hy2-port`、`--hy2-hop` 指定。从旧版本升级时这些设置都保持原样，需要时再手动修改：
-
-- **Salamander 混淆**：新安装默认关闭。打开后数据包没有 QUIC 特征，可以绕过针对 QUIC 的限速，但也不再像普通的 HTTP/3 流量，并且更耗 CPU。
-- **端口跳跃**：默认关闭。打开后服务器把一段 UDP 端口（默认 `16384-16402`）都转发到 Hysteria2 的端口，客户端每隔一段时间换一个端口连接，单个端口被限速或封锁时影响较小。
+Hysteria2 的端口、Salamander 混淆（默认关闭）和端口跳跃（默认关闭）可以在「协议管理」里修改。从旧版本升级时保持原样。
 
 ## 安装前准备
 
 1. **一台 VPS**：Debian 12+ 或 Ubuntu 22.04+，x86_64 或 arm64，可以使用 root，有独立的公网 IPv4。暂不支持：
-   - **NAT VPS**（多台共用一个公网 IPv4，只分配部分转发端口）：申请证书需要 80 端口，Reality-Vision 需要 443 端口。
+   - **NAT VPS**（多台共用一个公网 IPv4，只分配部分转发端口）：申请证书需要 80 端口，Reality-Vision 需要 443 端口。只有 443 端口时可以用[无域名安装](#无域名安装)。
    - **纯 IPv6 VPS**：GitHub 不支持 IPv6，无法下载 easyxray 和 Xray。
 2. **一个域名**：A 记录解析到这台 VPS 的公网 IP。没有域名时可以使用[无域名安装](#无域名安装)。
 3. **在云服务商的安全组中放行端口**：
@@ -82,7 +78,7 @@ Hysteria2 的端口和下面两个设置都可以在「协议管理」里选择 
    |---|---|---|
    | TCP | 80 | 申请和续期证书 |
    | TCP | 443 | Reality-Vision |
-   | UDP | 16384-16402 | Hysteria2（不使用端口跳跃时可以只放行它实际使用的端口） |
+   | UDP | 16384-16402 | Hysteria2 |
    | TCP | 8000-8100 | 其他协议（安装完成后可以只保留实际使用的端口） |
 
    系统自带的防火墙（ufw / firewalld / iptables）由 easyxray 自动配置。
@@ -152,7 +148,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 │ 2  完全安装
 │    全部 5 个协议
 │ 3  无域名安装
-│    没有域名时使用：只有 Reality，借用第三方网站伪装，没有订阅地址
+│    不推荐，只在没有域名或 NAT 机器上使用
 │ 4  从备份恢复
 │    沿用备份里的用户、密钥和端口，客户端不用重新导入
 │ 0  退出
@@ -184,43 +180,27 @@ curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh |
 | `--port-range 起-止` | 随机端口的范围，默认 `8000-8100` |
 | `--email 邮箱` | 第一个用户的邮箱，不填时自动生成 `随机前缀@xray.fake` |
 | `--hy2-port 端口` | Hysteria2 的端口，不填时在 `16384-16402` 内随机选择 |
-| `--hy2-hop 起-止` | 同时打开 Hysteria2 端口跳跃并指定范围，例如 `--hy2-hop 16384-16402` |
+| `--hy2-hop 起-止` | 打开 Hysteria2 端口跳跃，例如 `16384-16402` |
 | `--version 版本` | 安装指定版本，例如 `--version v0.2.0`，不填时安装最新版本 |
 | `--restore 备份文件` | 从备份恢复，见[从备份恢复](#从备份恢复) |
 | `--no-domain` | 无域名安装，见[无域名安装](#无域名安装) |
-| `--target 域名` | 无域名安装时使用的伪装域名，不填时从内置候选中探测并推荐 |
-| `--address IP` | 无域名安装时客户端连接的 IP，不填时自动获取本机公网 IPv4 |
+| `--target 域名` | 无域名安装的伪装域名，不填时自动推荐 |
+| `--address IP` | 无域名安装时客户端连接的 IP，不填时自动获取 |
 
 已经安装时带参数运行只会提示已安装，不会重复安装。
 
 ### 无域名安装
 
-没有域名时，可以只安装 Reality，借用第三方网站的证书伪装：
+不推荐。只在没有域名，或 NAT 机器无法用 80 端口申请证书时使用（仍需要 443 端口）。只安装 Reality，借用第三方网站伪装，比使用自己的域名更容易被识别：
 
 ```bash
-# 只安装 Reality-Vision，伪装域名从内置候选中探测并推荐
-bash install.sh --no-domain
-
-# 同时安装 Reality-XHTTP，并指定伪装域名
-bash install.sh --no-domain --full --target www.example.com
+bash install.sh --no-domain                                  # 只装 Reality-Vision，自动推荐伪装域名
+bash install.sh --no-domain --full --target www.example.com  # 加上 Reality-XHTTP，指定伪装域名
 ```
 
-也可以在安装菜单中选择「3 无域名安装」，从探测结果里选择伪装域名，或输入其他域名。
+也可以在安装菜单中选择「3 无域名安装」。伪装域名需要支持 TLS 1.3 和 HTTP/2，且不在 Cloudflare 后面，可以用 `ezx target probe [域名]` 探测，`ezx target set 域名` 更换。
 
-内置 10 个候选域名，都是全球 CDN 上的普通企业官网，避开了常见教程里被大量使用的域名。安装时从服务器上逐个探测，要求支持 TLS 1.3、HTTP/2 和 X25519，并且不在 Cloudflare 后面（否则别人可以借你的服务器访问 Cloudflare 上的网站）。在延迟最低的几个里随机推荐一个，同一地区的服务器不会都用同一个域名。
-
-```bash
-ezx target probe                          # 探测内置候选
-ezx target probe www.example.com          # 探测指定的域名
-ezx target set www.example.com            # 更换伪装域名（客户端需要重新导入节点）
-```
-
-和使用自己的域名相比，无域名安装有以下限制：
-
-- 只能使用 Reality-Vision 和 Reality-XHTTP，其他协议需要域名证书。
-- 没有订阅地址，用户需要逐条导入分享链接（`ezx sub` 显示链接和二维码），mihomo 配置文件保存在服务器上。
-- 伪装域名不解析到这台服务器，伪装网站也不在本机，比使用自己的域名更容易被识别。
-- 之后要改用域名，需要完全卸载后重新安装。
+限制：只能用 Reality 协议；没有订阅地址，需要逐条导入分享链接；改用域名需要完全卸载后重新安装。
 
 ### 手动安装
 
@@ -244,7 +224,7 @@ sha256sum -c easyxray.tar.gz.sha256 && tar -xzf easyxray.tar.gz && rm -f easyxra
 bash install.sh --restore /root/easyxray-backup-20261027-120000.tar.gz
 ```
 
-也可以不带参数运行 `bash install.sh`，在安装菜单中选择「4 从备份恢复」。无域名安装的备份恢复后，节点地址换成新服务器的 IP，客户端需要重新导入节点。恢复后沿用原来的用户、密钥、端口和分流规则，证书在新服务器上重新申请，客户端不需要重新导入订阅。
+也可以不带参数运行 `bash install.sh`，在安装菜单中选择「4 从备份恢复」。恢复后沿用原来的用户、密钥、端口和分流规则，证书在新服务器上重新申请，客户端不需要重新导入订阅（无域名安装因为 IP 变了，需要重新导入节点）。
 
 备份文件包含全部用户和密钥，请妥善保管。
 
@@ -270,7 +250,7 @@ sudo ezx sub
 
 sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.9.8 起 Reality 要求的 X25519MLKEM768（[SagerNet/sing-box#4520](https://github.com/SagerNet/sing-box/issues/4520)），sing-box v1.14.4 实测无法连接 Reality-Vision，Reality-XHTTP 依赖同样的握手，可以改用 Hysteria2、XHTTP-TLS 或 VLESS-TLS-Vision。
 
-使用 Hysteria2 节点时，在客户端中按自己宽带的实际速度填写上行 / 下行带宽，下行建议填实测下载速度的 80%~90%。开启端口跳跃后，分享链接用 `mport` 参数表示端口范围（Shadowrocket、v2rayN 可以识别），mihomo 订阅里是 `ports` 和 `hop-interval`；修改混淆或端口跳跃后需要在客户端中更新订阅。
+使用 Hysteria2 节点时，在客户端中按自己宽带的实际速度填写上行 / 下行带宽，下行建议填实测下载速度的 80%~90%。修改 Hysteria2 的设置后，在客户端中更新订阅。
 
 ## 菜单使用说明
 
@@ -312,7 +292,7 @@ sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.
 - 通用订阅（Shadowrocket、v2rayN）：`https://你的域名/s/随机令牌`
 - mihomo 订阅（FlClash、Clash Verge 等）：`https://你的域名/s/随机令牌/mihomo`
 
-无域名安装没有订阅地址，这一项显示为「查看分享链接」，列出每个节点的链接和二维码。
+无域名安装时显示为「查看分享链接」。
 
 ### 2. 用户管理
 
@@ -346,9 +326,7 @@ sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.
 │ 0  返回
 ```
 
-输入 1-5 开启或关闭对应协议，输入 6 重新生成密钥。无域名安装时还有「7 更换伪装域名」，需要域名证书的协议显示为「需要域名」。
-
-Hysteria2 开启后，选择它进入设置：
+输入 1-5 开启或关闭对应协议，输入 6 重新生成密钥。Hysteria2 开启后，选择它进入设置：
 
 ```
 │ Hysteria2  UDP 16391
@@ -361,7 +339,7 @@ Hysteria2 开启后，选择它进入设置：
 │ 0  返回
 ```
 
-打开端口跳跃时可以输入端口范围，直接回车使用 `16384-16402`，然后在云服务商的安全组中放行这段 UDP 端口。
+打开端口跳跃后，在云服务商的安全组中放行整段 UDP 端口。
 
 - 首次开启时自动分配端口并生成密钥；关闭后再开启，沿用原来的端口和密钥。
 - Reality-Vision 不能关闭。
@@ -466,13 +444,9 @@ ezx protocol enable xhttp-tls --port 8088
 ezx protocol disable xhttp-tls
 ezx protocol set hysteria2 port 16390  # 修改 Hysteria2 端口
 ezx protocol set hysteria2 obfs on     # Hysteria2 混淆（off 为关闭）
-ezx protocol set hysteria2 hop on      # Hysteria2 端口跳跃，默认 16384-16402（off 为关闭）
-ezx protocol set hysteria2 hop on 20000-20100
-
-# 伪装域名（无域名安装）
-ezx target show
-ezx target probe [域名...]
-ezx target set www.example.com
+ezx protocol set hysteria2 hop on      # 端口跳跃，默认 16384-16402，也可以写范围（off 为关闭）
+ezx target probe [域名]                # 无域名安装：探测伪装域名
+ezx target set www.example.com         # 无域名安装：更换伪装域名
 
 # 用户与订阅
 ezx user list
@@ -548,7 +522,7 @@ ezx uninstall --purge                 # 完全卸载
 | `/etc/nginx/conf.d/easyxray.conf` | 生成的 Nginx 配置 |
 | `/etc/systemd/system/easyxray.service` | Xray 服务 |
 | `/etc/systemd/system/easyxray-geo.timer` | geo 数据每周自动更新 |
-| `/etc/systemd/system/easyxray-hop.service` | 开启 Hysteria2 端口跳跃时，加载 `/etc/easyxray/hop.nft` 里的 nftables 转发规则 |
+| `/etc/systemd/system/easyxray-hop.service` | Hysteria2 端口跳跃的转发规则 |
 | `/etc/sysctl.d/99-easyxray.conf` | 内核参数：BBR、关闭 MPTCP |
 | `/root/easyxray-backup-*.tar.gz` | 导出的备份文件 |
 
@@ -561,9 +535,8 @@ ezx uninstall --purge                 # 完全卸载
 **客户端无法连接**
 
 1. 运行 `sudo ezx doctor`，确认所有项目都是「正常」。
-2. 确认云服务商的安全组放行了各协议的端口，Hysteria2 使用 UDP；开启端口跳跃时还要放行整段 UDP 端口。
-3. 无域名安装时，运行 `sudo ezx target probe` 检查伪装域名是否仍然可用，不可用时用 `ezx target set` 更换。
-4. 在客户端中更新订阅。
+2. 确认云服务商的安全组放行了各协议的端口，Hysteria2 使用 UDP。
+3. 在客户端中更新订阅。
 
 **速度慢**
 
@@ -616,7 +589,7 @@ sudo ezx uninstall
 
 用户、密钥删除后无法恢复，重新安装后客户端需要重新导入订阅。Nginx、certbot 等系统软件包和 BBR 设置会保留。
 
-要换一个域名重新安装，或在域名和无域名安装之间切换，需要先完全卸载。
+要换一个域名或改成无域名安装，需要先完全卸载。
 
 ## 许可证
 
