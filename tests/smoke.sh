@@ -256,6 +256,23 @@ x install --domain test.example.com --hy2-port 20000 --hy2-hop 20000-20050 >/dev
 check "安装时指定 Hysteria2 端口和跳跃范围" bash -c "jq -e '.protocols.hysteria2 | .port == 20000 and .hopPorts == \"20000-20050\"' ${S} >/dev/null && grep -q 'udp dport 20000-20050 redirect to :20000' ${R}/etc/easyxray/hop.nft"
 check "安装时指定后配置有效" xray_ok
 
+echo "上次安装没有完成"
+echo y | x uninstall --purge >/dev/null 2>&1
+mkdir -p "${R}/etc/easyxray/tls"
+for d in test.example.com right.example.com; do cp "${R}/cert.crt" "${R}/etc/easyxray/tls/${d}.crt" && cp "${R}/cert.key" "${R}/etc/easyxray/tls/${d}.key"; done
+# 模拟第一次安装填错域名、申请证书失败：状态文件留下，但没有标记 installed
+EZ_HOME="${HERE}" bash -c "source ${HERE}/lib/common.sh; state_init wrong.example.com"
+check "没装完时能换成正确的域名" bash -c "bash ${HERE}/easyxray install --domain right.example.com >/dev/null 2>&1 && jq -e '.domain == \"right.example.com\" and .system.installed == true' ${S} >/dev/null"
+check "换域名后配置有效" xray_ok
+echo y | x uninstall --keep-config >/dev/null 2>&1
+check "保留配置卸载后仍不能换域名" bash -c "! bash ${HERE}/easyxray install --domain test.example.com"
+echo y | x uninstall --purge >/dev/null 2>&1
+mkdir -p "${R}/etc/easyxray/tls"
+EZ_HOME="${HERE}" bash -c "source ${HERE}/lib/common.sh; state_init wrong.example.com"
+x install --no-domain --target www.example.com --address 192.0.2.10 >/dev/null 2>&1
+check "没装完时能改成无域名安装" jq -e '.noDomain == true and .domain == "" and .system.installed == true' "${S}"
+echo y | x uninstall --purge >/dev/null 2>&1
+
 echo "无域名模式"
 echo y | x uninstall --purge >/dev/null 2>&1
 check "--domain 和 --no-domain 不能同时使用" bash -c "! bash ${HERE}/easyxray install --no-domain --domain test.example.com --target www.example.com --address 192.0.2.10"

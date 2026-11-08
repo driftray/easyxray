@@ -21,7 +21,7 @@ EZ_NGINX_CONF=${EZ_ROOT}/etc/nginx/conf.d/easyxray.conf
 EZ_USER=easyxray
 
 # easyxray 自身的版本
-EZ_VERSION=0.7.1
+EZ_VERSION=0.7.2
 # 发布地址：更新时从这个仓库的 GitHub Release 下载
 EZ_REPO=driftray/easyxray
 
@@ -136,6 +136,11 @@ state_init() {
 }
 
 no_domain() { [[ "$(state_get .noDomain)" == "true" ]]; }
+
+# 上次安装没有完成：状态文件在，但从没标记过 installed（保留配置卸载、从备份恢复时 installed 是 false）
+install_unfinished() {
+    state_exists && [[ "$(jq -r '.system | has("installed")' "${EZ_STATE}")" == "false" ]]
+}
 
 # 客户端连接的地址：有域名时是域名，无域名模式是公网 IP
 server_addr() {

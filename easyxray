@@ -104,6 +104,15 @@ cmd_install() {
     if state_exists && [[ "$(state_get '.system.installed')" == "true" ]]; then
         die "已经安装过了（${EZ_STATE}）。修改设置请用其他命令，重新安装请先 uninstall"
     fi
+    # 上次安装没有完成时，还没有客户端用过这份配置：换了域名或安装方式就丢掉它，按新的设置重新开始
+    if install_unfinished && {
+        [[ -n "${restore}" ]] ||
+            { [[ -n "${nodomain}" ]] && ! no_domain; } ||
+            { [[ -n "${domain}" && "$(state_get .domain)" != "${domain}" ]]; }
+    }; then
+        info "上次安装没有完成，改用新的设置重新安装"
+        rm -f "${EZ_STATE}"
+    fi
     # 从备份恢复：先把备份里的配置放好，后面按「沿用已有配置」安装
     [[ -n "${restore}" ]] && restore_state "${restore}"
     # 保留的配置（或备份）是无域名模式时沿用
@@ -636,15 +645,19 @@ cmd_uninstall() {
 # ---------- 菜单 ----------
 
 menu_install() {
-    local kept=''
+    local kept='' last='' desc=''
     if state_exists; then
-        if no_domain; then kept="无域名模式（伪装域名 $(state_get .realityTarget)）"; else kept="域名 $(state_get .domain)"; fi
+        if no_domain; then desc="无域名模式（伪装域名 $(state_get .realityTarget)）"; else desc="域名 $(state_get .domain)"; fi
+        # 没装完的配置可以直接换掉；保留配置卸载留下的配置里有用户，要确认后才删除
+        if install_unfinished; then last=$(state_get .domain); else kept=${desc}; fi
     fi
     ui_banner
     ui_rule
     if [[ -n "${kept}" ]]; then
         ui_row "检测到保留的配置：${kept}，$(jq '.users | length' "${EZ_STATE}") 个用户"
         ui_row "${C_DIM}重新安装会沿用原来的用户、端口和密钥，客户端不用重新导入${C_RESET}"
+    elif [[ -n "${desc}" ]]; then
+        ui_row "上次安装没有完成（${desc}），可以重新选择安装方式"
     else
         ui_row "${C_DIM}还没有安装，请选择安装方式：${C_RESET}"
     fi
@@ -662,11 +675,17 @@ menu_install() {
     else
         ui_row "   ${C_DIM}全部 5 个协议${C_RESET}"
     fi
-    if [[ -z "${kept}" ]]; then
+    if [[ -n "${kept}" ]]; then
+        ui_menu 3 "删除保留的配置" "" ""
+        ui_row "   ${C_DIM}删除原来的用户、端口和密钥，重新选择安装方式${C_RESET}"
+    else
         ui_menu 3 "无域名安装" "" ""
         ui_row "   ${C_DIM}不推荐，只在没有域名时使用${C_RESET}"
         ui_menu 4 "从备份恢复" "" ""
         ui_row "   ${C_DIM}沿用备份里的用户、密钥和端口，客户端不用重新导入${C_RESET}"
+        if [[ -n "${desc}" ]]; then
+            ui_menu 5 "删除上次的配置" "" ""
+        fi
     fi
     ui_menu 0 "退出" "" ""
     ui_bottom
@@ -678,7 +697,12 @@ menu_install() {
             # 域名或无域名模式都从保留的配置里读取
             if [[ "${choice}" == "2" ]]; then (cmd_install --full); else (cmd_install); fi
         else
-            domain=$(ui_ask "域名（已解析到本机，例如 box.example.com）：")
+            if [[ -n "${last}" ]]; then
+                domain=$(ui_ask "域名（已解析到本机，直接回车沿用 ${last}）：")
+                domain=${domain:-${last}}
+            else
+                domain=$(ui_ask "域名（已解析到本机，例如 box.example.com）：")
+            fi
             email=$(ui_ask "第一个用户的邮箱（直接回车自动生成）：")
             if [[ "${choice}" == "2" ]]; then
                 (cmd_install --domain "${domain}" --full ${email:+--email "${email}"})
@@ -689,7 +713,13 @@ menu_install() {
         ui_pause
         ;;
     3)
-        [[ -z "${kept}" ]] || return 1
+        if [[ -n "${kept}" ]]; then
+            confirm "删除后原来的用户和密钥无法恢复，客户端需要重新导入，确认" || return 0
+            remove_system_files
+            rm -rf "${EZ_ETC}"
+            ok "已删除保留的配置"
+            return 0
+        fi
         menu_install_nodomain
         ui_pause
         ;;
@@ -699,6 +729,12 @@ menu_install() {
         file=$(ui_ask "备份文件路径（例如 /root/easyxray-backup-20261027-120000.tar.gz）：")
         [[ -n "${file}" ]] && (cmd_install --restore "${file}")
         ui_pause
+        ;;
+    5)
+        [[ -z "${kept}" && -n "${desc}" ]] || return 1
+        remove_system_files
+        rm -rf "${EZ_ETC}"
+        ok "已删除上次的配置"
         ;;
     *) return 1 ;;
     esac
