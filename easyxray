@@ -16,9 +16,10 @@ easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
 用法：easyxray [命令]（不带命令进入菜单）
 
   install --domain 域名 [--full] [--protocols a,b] [--port-range 8000-8100] [--email 邮箱]
-          [--hy2-port 端口] [--hy2-hop 范围]
+          [--hy2-port 端口] [--hy2-hop 范围] [--hy2-bandwidth 上行,下行|test]
                                   首次安装。默认推荐安装（Reality-Vision + Hysteria2），--full 安装全部 5 个协议
                                   --hy2-port 指定 Hysteria2 端口（默认 16384-16402 内随机），--hy2-hop 同时打开端口跳跃
+                                  --hy2-bandwidth 设置服务端带宽（Mbps，丢包率高的线路用），test 表示现场测速
   install --no-domain [--target 伪装域名] [--full] [--address IP] [--email 邮箱]
                                   无域名安装（不推荐，只在没有域名时使用）：只有 Reality，没有订阅地址
   install --restore 备份文件      在新服务器上从备份恢复，沿用原来的用户、密钥和端口
@@ -26,6 +27,8 @@ easyxray ${EZ_VERSION}：简单、安全的 Xray 服务器管理工具
   protocol set hysteria2 port 端口               修改 Hysteria2 端口
   protocol set hysteria2 obfs on|off            Hysteria2 混淆（默认关闭）
   protocol set hysteria2 hop on [范围] | off     Hysteria2 端口跳跃（默认范围 16384-16402）
+  protocol set hysteria2 bandwidth 上行 下行 | test | off
+                                  Hysteria2 服务端带宽（Mbps）：手动填写 / 现场测速 / 清除
   target probe [域名...] | set 域名 | show       无域名模式的伪装域名：探测可用性和延迟 / 更换 / 查看
   user list | add [邮箱] | del 邮箱  不填邮箱时生成 随机前缀@xray.fake
   sub [邮箱]                      显示订阅地址和分享链接
@@ -82,7 +85,7 @@ link_commands() {
 }
 
 cmd_install() {
-    local domain='' full='' protocols='' range='' email='' restore='' nodomain='' target='' address='' hy2_port='' hy2_hop='' xray_version p
+    local domain='' full='' protocols='' range='' email='' restore='' nodomain='' target='' address='' hy2_port='' hy2_hop='' hy2_bw='' xray_version p
     while (($#)); do
         case "$1" in
         --domain) domain=$2; shift ;;
@@ -91,6 +94,7 @@ cmd_install() {
         --address) address=$2; shift ;;
         --hy2-port) hy2_port=$2; shift ;;
         --hy2-hop) hy2_hop=$2; shift ;;
+        --hy2-bandwidth) hy2_bw=$2; shift ;;
         --full) full=1 ;;
         --protocols) protocols=$2; shift ;;
         --port-range) range=$2; shift ;;
@@ -153,8 +157,12 @@ cmd_install() {
         [[ -z "${nodomain}" || " ${EZ_PROTOCOLS_NODOMAIN[*]} " == *" ${p} "* ]] ||
             die "无域名模式只能使用 Reality-Vision 和 Reality-XHTTP，$(proto_call "${p}" title) 需要域名证书"
     done
-    if [[ -n "${hy2_port}${hy2_hop}" && ",${protocols}," != *",hysteria2,"* ]]; then
-        die "--hy2-port、--hy2-hop 需要同时安装 Hysteria2"
+    if [[ -n "${hy2_port}${hy2_hop}${hy2_bw}" && ",${protocols}," != *",hysteria2,"* ]]; then
+        die "--hy2-port、--hy2-hop、--hy2-bandwidth 需要同时安装 Hysteria2"
+    fi
+    if [[ -n "${hy2_bw}" && "${hy2_bw}" != test ]]; then
+        [[ "${hy2_bw}" == *,* ]] && hysteria2_valid_mbps "${hy2_bw%,*}" && hysteria2_valid_mbps "${hy2_bw#*,}" ||
+            die "--hy2-bandwidth 不正确：${hy2_bw}（写成 上行,下行，单位 Mbps，例如 1000,1000；或者写 test 现场测速）"
     fi
     [[ -z "${hy2_port}" || ( "${hy2_port}" =~ ^[0-9]+$ && "${hy2_port}" -ge 1 && "${hy2_port}" -le 65535 ) ]] ||
         die "Hysteria2 端口不正确：${hy2_port}"
@@ -208,6 +216,7 @@ cmd_install() {
         if [[ "${p}" == hysteria2 ]]; then protocol_enable_state "${p}" "${hy2_port}"; else protocol_enable_state "${p}"; fi
     done
     [[ -n "${hy2_hop}" ]] && hysteria2_set_hop "${hy2_hop}"
+    [[ -n "${hy2_bw}" ]] && install_hy2_bandwidth "${hy2_bw}"
     if [[ "$(jq '.users | length' "${EZ_STATE}")" -eq 0 ]]; then
         email=$(user_add_state "${email}")
     else
@@ -222,6 +231,21 @@ cmd_install() {
     cmd_protocol_list
     warn "请在云服务商的安全组里放行：$(cloud_ports | sort -u | tr '\n' ' ')"
     cmd_sub "${email}"
+}
+
+# 安装时设置 Hysteria2 带宽：$1=「上行,下行」或 test。测速失败不影响安装
+install_hy2_bandwidth() {
+    local value=$1
+    if [[ "${value}" == test ]]; then
+        info "到就近的 Speedtest 节点测速，大约需要 20 秒..."
+        value=$(hysteria2_speedtest) || {
+            warn "测速失败，先不设置 Hysteria2 带宽，之后可以用 ezx protocol set hysteria2 bandwidth 设置"
+            return 0
+        }
+        value=${value/ /,}
+        info "测速结果：上行 ${value%,*} Mbps，下行 ${value#*,} Mbps"
+    fi
+    hysteria2_set_bandwidth "${value%,*}" "${value#*,}"
 }
 
 # 无域名安装：记录公网 IP 和伪装域名。没有指定伪装域名时探测内置候选，选延迟最低的
@@ -269,6 +293,9 @@ proto_note() {
     local note=''
     hysteria2_obfs_on && note=混淆
     [[ -n "$(hysteria2_hop_ports)" ]] && note+="${note:+，}跳跃 $(hysteria2_hop_ports)"
+    local bw
+    bw=$(hysteria2_bandwidth)
+    [[ -n "${bw}" ]] && note+="${note:+，}带宽 ${bw/ //} Mbps"
     [[ -n "${note}" ]] && printf '（%s）' "${note}"
     return 0
 }
@@ -314,8 +341,24 @@ cmd_hysteria2_set() {
         warn "请在云服务商的安全组里放行 UDP $(hysteria2_hop_ports)"
         ;;
     "hop off") apply_change hysteria2_set_hop off && ok "已关闭 Hysteria2 端口跳跃。${hint}" ;;
-    *) die "用法：easyxray protocol set hysteria2 port 端口 | obfs on|off | hop on [范围，默认 ${EZ_HY2_PORT_RANGE}] | hop off" ;;
+    "bandwidth off") apply_change hysteria2_set_bandwidth off && ok "已清除 Hysteria2 服务端带宽，改用 BBR" ;;
+    "bandwidth test")
+        local result
+        info "到就近的 Speedtest 节点测速，大约需要 20 秒..."
+        result=$(hysteria2_speedtest) || die "测速失败，请用 easyxray protocol set hysteria2 bandwidth 上行 下行 手动填写"
+        hy2_apply_bandwidth ${result}
+        ;;
+    "bandwidth "*) hy2_apply_bandwidth "${2:-}" "${3:-}" ;;
+    *) die "用法：easyxray protocol set hysteria2 port 端口 | obfs on|off | hop on [范围，默认 ${EZ_HY2_PORT_RANGE}] | hop off | bandwidth 上行 下行|test|off" ;;
     esac
+}
+
+hy2_apply_bandwidth() {
+    hysteria2_valid_mbps "$1" && hysteria2_valid_mbps "$2" ||
+        die "带宽不正确：$1 $2（上行 下行，单位 Mbps，1-100000，例如 1000 1000）"
+    apply_change hysteria2_set_bandwidth "$1" "$2" || return 1
+    ok "Hysteria2 服务端带宽：上行 $1 Mbps，下行 $2 Mbps"
+    warn "还需要在客户端填写自己宽带的上行/下行带宽：两端都设置才会启用 Brutal，只设一端仍然是 BBR"
 }
 
 # ---------- 用户与订阅 ----------
@@ -377,7 +420,13 @@ cmd_sub() {
     done < <(jq -r --arg e "${email}" '.users[] | select($e == "" or .email == $e) | [.email, .uuid, .subToken] | @tsv' "${EZ_STATE}")
     printf '\n'
     warn "Shadowrocket：请在 设置 → TCP 中选择支持 X25519MLKEM768 的较新 TLS 指纹，例如 chrome140、safari26_3"
-    protocol_enabled hysteria2 && warn "Hysteria2：请在客户端里按自己宽带的实际速度填写上行/下行带宽"
+    if protocol_enabled hysteria2; then
+        if [[ -n "$(hysteria2_bandwidth)" ]]; then
+            warn "Hysteria2：服务端已设置带宽，请在客户端填写自己宽带的上行/下行带宽（不要高于实际速度），两端都设置才会启用 Brutal"
+        else
+            info "Hysteria2：默认用 BBR，客户端不用填带宽；丢包率高的线路需要服务端和客户端都设置带宽，见 ezx protocol set hysteria2 bandwidth"
+        fi
+    fi
     return 0
 }
 
@@ -704,10 +753,11 @@ menu_install() {
                 domain=$(ui_ask "域名（已解析到本机，例如 box.example.com）：")
             fi
             email=$(ui_ask "第一个用户的邮箱（直接回车自动生成）：")
+            pick_hy2_bandwidth
             if [[ "${choice}" == "2" ]]; then
-                (cmd_install --domain "${domain}" --full ${email:+--email "${email}"})
+                (cmd_install --domain "${domain}" --full ${email:+--email "${email}"} ${EZ_PICKED_BW:+--hy2-bandwidth "${EZ_PICKED_BW}"})
             else
-                (cmd_install --domain "${domain}" ${email:+--email "${email}"})
+                (cmd_install --domain "${domain}" ${email:+--email "${email}"} ${EZ_PICKED_BW:+--hy2-bandwidth "${EZ_PICKED_BW}"})
             fi
         fi
         ui_pause
@@ -738,6 +788,34 @@ menu_install() {
         ;;
     *) return 1 ;;
     esac
+}
+
+# 询问 Hysteria2 服务端带宽，结果放在 EZ_PICKED_BW：「上行,下行」、test、off（$1=manage 时可以清除）或空（不改）
+pick_hy2_bandwidth() {
+    local first=跳过 up down
+    [[ "${1:-}" == manage ]] && first="清除带宽设置"
+    EZ_PICKED_BW=''
+    printf '\n'
+    ui_top
+    ui_title "Hysteria2 带宽"
+    ui_rule
+    ui_row "丢包率低的线路不用设置，默认用 BBR"
+    ui_row "丢包率高的线路：服务端和客户端都要填上下行带宽，才会启用 Brutal"
+    ui_row "${C_DIM}只填一端不生效；客户端的带宽在客户端里按自己宽带的实际速度填写${C_RESET}"
+    ui_rule
+    ui_menu 1 "${first}" 2 "填写官方标称带宽"
+    ui_menu 3 "现场测速（消耗一些流量）" "" ""
+    ui_bottom
+    case "$(ui_ask "请选择（直接回车跳过）：")" in
+    1) [[ "${1:-}" == manage ]] && EZ_PICKED_BW=off ;;
+    2)
+        up=$(ui_ask "服务器上行带宽（Mbps）：")
+        down=$(ui_ask "服务器下行带宽（Mbps）：")
+        EZ_PICKED_BW="${up},${down}"
+        ;;
+    3) EZ_PICKED_BW=test ;;
+    esac
+    return 0
 }
 
 # 探测候选伪装域名并让用户选择，结果放在 EZ_PICKED_TARGET；回车选推荐，也可以直接输入其他域名
@@ -859,7 +937,7 @@ menu_protocols() {
     fi
     ui_row "${C_CYAN}0${C_RESET}  返回"
     ui_rule
-    ui_row "${C_DIM}选择 1-5 切换开启/关闭；Reality-Vision 不能关闭；Hysteria2 开启后可以设置混淆和端口跳跃${C_RESET}"
+    ui_row "${C_DIM}选择 1-5 切换开启/关闭；Reality-Vision 不能关闭；Hysteria2 开启后可以设置混淆、端口跳跃和带宽${C_RESET}"
     ui_row "${C_DIM}怀疑分享链接泄露时可以重新生成密钥，客户端更新订阅即可${C_RESET}"
     ui_bottom
     idx=$(pick_one "请选择：" "${count}") || return 0
@@ -884,22 +962,26 @@ menu_protocols() {
 }
 
 menu_hysteria2() {
-    local hop
+    local hop bw
     hop=$(hysteria2_hop_ports)
+    bw=$(hysteria2_bandwidth)
     printf '\n'
     ui_top
     ui_title "Hysteria2  UDP $(proto_get hysteria2 .port)"
     ui_rule
     ui_row "混淆       $(hysteria2_obfs_on && echo "${C_GREEN}开${C_RESET}" || echo 关)"
     ui_row "端口跳跃   ${hop:-关}"
+    if [[ -n "${bw}" ]]; then ui_row "带宽       上行 ${bw% *} / 下行 ${bw#* } Mbps"; else ui_row "带宽       未设置（BBR）"; fi
     ui_rule
     ui_menu 1 "$(hysteria2_obfs_on && echo 关闭 || echo 打开)混淆" 2 "$([[ -n "${hop}" ]] && echo 关闭 || echo 打开)端口跳跃"
-    ui_menu 3 "修改端口" 4 "关闭 Hysteria2"
+    ui_menu 3 "修改端口" 4 "设置带宽"
+    ui_menu 5 "关闭 Hysteria2" "" ""
     ui_menu 0 "返回" "" ""
     ui_rule
     ui_row "${C_DIM}混淆：隐藏 QUIC 特征，可绕过针对 QUIC 的限速，但不再像 HTTP/3，也更耗 CPU${C_RESET}"
     ui_row "${C_DIM}端口跳跃：客户端定时换端口连接，需要在安全组放行 UDP ${hop:-${EZ_HY2_PORT_RANGE}}${C_RESET}"
-    ui_row "${C_DIM}改动后客户端需要更新订阅${C_RESET}"
+    ui_row "${C_DIM}带宽：丢包率高的线路用，服务端和客户端都要设置${C_RESET}"
+    ui_row "${C_DIM}改动混淆、端口跳跃或端口后，客户端需要更新订阅${C_RESET}"
     ui_bottom
     case "$(ui_ask "请选择：")" in
     1) if hysteria2_obfs_on; then (cmd_hysteria2_set obfs off); else (cmd_hysteria2_set obfs on); fi ;;
@@ -917,7 +999,15 @@ menu_hysteria2() {
         [[ -n "${port}" ]] || return 0
         (cmd_hysteria2_set port "${port}")
         ;;
-    4) (cmd_protocol disable hysteria2) ;;
+    4)
+        pick_hy2_bandwidth manage
+        case "${EZ_PICKED_BW}" in
+        '') return 0 ;;
+        off | test) (cmd_hysteria2_set bandwidth "${EZ_PICKED_BW}") ;;
+        *) (cmd_hysteria2_set bandwidth "${EZ_PICKED_BW%,*}" "${EZ_PICKED_BW#*,}") ;;
+        esac
+        ;;
+    5) (cmd_protocol disable hysteria2) ;;
     *) return 0 ;;
     esac
     ui_pause

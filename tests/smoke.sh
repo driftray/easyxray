@@ -135,6 +135,19 @@ check "重新生成密钥后保留混淆和端口跳跃设置" jq -e '.protocols
 x protocol set hysteria2 hop off >/dev/null 2>&1
 check "关闭端口跳跃后删除规则和 mport" bash -c "[[ ! -e ${R}/etc/easyxray/hop.nft ]] && ! links | grep -q mport"
 check "Hysteria2 只有自己有可调整的设置" bash -c "! bash ${HERE}/easyxray protocol set xhttp-tls obfs on"
+check "默认不设置带宽" jq -e '.protocols.hysteria2 | has("bandwidth") | not' "${S}"
+x protocol set hysteria2 bandwidth 300 500 >/dev/null 2>&1
+check "设置带宽后写入 brutalUp 和 brutalDown" hy '.streamSettings.finalmask.quicParams == {brutalUp: "300 mbps", brutalDown: "500 mbps"}'
+check "设置带宽后配置有效" xray_ok
+x protocol set hysteria2 obfs on >/dev/null 2>&1
+check "带宽和混淆可以同时开启" hy '.streamSettings.finalmask | has("udp") and has("quicParams")'
+check "带宽和混淆同时开启时配置有效" xray_ok
+x protocol set hysteria2 obfs off >/dev/null 2>&1
+check "带宽不正确时拒绝" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 bandwidth 0 500 && ! bash ${HERE}/easyxray protocol set hysteria2 bandwidth abc 500 && ! bash ${HERE}/easyxray protocol set hysteria2 bandwidth 300"
+check "测速失败时不改变带宽" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 bandwidth test && jq -e '.protocols.hysteria2.bandwidth == {up: 300, down: 500}' ${S}"
+x protocol set hysteria2 bandwidth off >/dev/null 2>&1
+check "清除带宽后状态里没有带宽" jq -e '.protocols.hysteria2 | has("bandwidth") | not' "${S}"
+check "清除带宽后没有 finalmask" hy '.streamSettings | has("finalmask") | not'
 x protocol set hysteria2 port 16400 >/dev/null 2>&1
 check "修改 Hysteria2 端口" hy '.port == 16400'
 check "端口已分配给其他协议时拒绝" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 port 443"
@@ -252,7 +265,9 @@ echo y | x uninstall --purge >/dev/null 2>&1
 mkdir -p "${R}/etc/easyxray/tls"
 cp "${R}/cert.crt" "${R}/etc/easyxray/tls/test.example.com.crt" && cp "${R}/cert.key" "${R}/etc/easyxray/tls/test.example.com.key"
 check "没装 Hysteria2 时不能用 --hy2-port" bash -c "! bash ${HERE}/easyxray install --domain test.example.com --protocols reality-vision --hy2-port 20000"
-x install --domain test.example.com --hy2-port 20000 --hy2-hop 20000-20050 >/dev/null 2>&1
+check "安装时带宽格式不正确时拒绝" bash -c "! bash ${HERE}/easyxray install --domain test.example.com --hy2-bandwidth abc"
+x install --domain test.example.com --hy2-port 20000 --hy2-hop 20000-20050 --hy2-bandwidth 100,200 >/dev/null 2>&1
+check "安装时设置带宽" jq -e '.protocols.hysteria2.bandwidth == {up: 100, down: 200}' "${S}"
 check "安装时指定 Hysteria2 端口和跳跃范围" bash -c "jq -e '.protocols.hysteria2 | .port == 20000 and .hopPorts == \"20000-20050\"' ${S} >/dev/null && grep -q 'udp dport 20000-20050 redirect to :20000' ${R}/etc/easyxray/hop.nft"
 check "安装时指定后配置有效" xray_ok
 

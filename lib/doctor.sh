@@ -45,6 +45,7 @@ ez_doctor() {
     done < <(enabled_protocols)
     if protocol_enabled hysteria2; then
         if hysteria2_obfs_on; then doc_ok "Hysteria2 混淆：开启"; else doc_ok "Hysteria2 混淆：关闭"; fi
+        if [[ -n "$(hysteria2_bandwidth)" ]]; then doc_ok "Hysteria2 带宽：$(hysteria2_bandwidth | sed 's/ /\//') Mbps（上行/下行）"; else doc_ok "Hysteria2 带宽：未设置（BBR）"; fi
         if [[ -z "$(hop_range)" ]]; then
             doc_ok "Hysteria2 端口跳跃：关闭"
         elif hop_active; then

@@ -64,7 +64,7 @@ easyxray 是一个用 Bash 编写的 Xray 服务器管理工具：一条命令�
 
 随机端口默认在 `8000-8100` 范围内选择空闲端口（Hysteria2 在 `16384-16402` 内），选定后固定不变。XHTTP-TLS 的端口由 Nginx 监听，XHTTP 路径转发给 Xray，其他路径返回伪装站点。
 
-Hysteria2 的端口、Salamander 混淆（默认关闭）和端口跳跃（默认关闭）可以在「协议管理」里修改。从旧版本升级时保持原样。
+Hysteria2 的端口、Salamander 混淆（默认关闭）、端口跳跃（默认关闭）和服务端带宽（默认不设置）可以在「协议管理」里修改。从旧版本升级时保持原样。
 
 ## 安装前准备
 
@@ -135,7 +135,7 @@ curl -fsSLO https://raw.githubusercontent.com/driftray/easyxray/main/install.sh 
 ╭────────────────────────────────────────────────────────
 │
 │   ┌─┐┌─┐┌─┐┬ ┬─┐ ┬┬─┐┌─┐┬ ┬
-│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.7.2
+│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.7.3
 │   └─┘┴ ┴└─┘ ┴ ┴ └─┴└─┴ ┴ ┴
 │   简单、安全的 Xray 服务器管理工具
 │   改动前自动校验 · 失败自动回滚 · 一个文件管理全部配置
@@ -181,6 +181,7 @@ curl -fsSL https://raw.githubusercontent.com/driftray/easyxray/main/install.sh |
 | `--email 邮箱` | 第一个用户的邮箱，不填时自动生成 `随机前缀@xray.fake` |
 | `--hy2-port 端口` | Hysteria2 的端口，不填时在 `16384-16402` 内随机选择 |
 | `--hy2-hop 起-止` | 打开 Hysteria2 端口跳跃，例如 `16384-16402` |
+| `--hy2-bandwidth 上行,下行` | Hysteria2 服务端带宽（Mbps），丢包率高的线路使用；写 `test` 时现场测速 |
 | `--version 版本` | 安装指定版本，例如 `--version v0.6.0`，不填时安装最新版本 |
 | `--restore 备份文件` | 从备份恢复，见[从备份恢复](#从备份恢复) |
 | `--no-domain` | 无域名安装，见[无域名安装](#无域名安装) |
@@ -250,7 +251,7 @@ sudo ezx sub
 
 sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.9.8 起 Reality 要求的 X25519MLKEM768（[SagerNet/sing-box#4520](https://github.com/SagerNet/sing-box/issues/4520)），sing-box v1.14.4 实测无法连接 Reality-Vision，Reality-XHTTP 依赖同样的握手，可以改用 Hysteria2、XHTTP-TLS 或 VLESS-TLS-Vision。
 
-使用 Hysteria2 节点时，在客户端中按自己宽带的实际速度填写上行 / 下行带宽，下行建议填实测下载速度的 80%~90%。修改 Hysteria2 的设置后，在客户端中更新订阅。
+Hysteria2 默认使用 BBR，不用填写带宽。丢包率高的线路需要服务端和客户端都设置上下行带宽才会启用 Brutal，只填一端不生效：服务端在安装时选择，或用 `ezx protocol set hysteria2 bandwidth` 设置，可以填 VPS 官方标称带宽或现场测速；客户端按自己宽带的实际速度填写，下行建议填实测下载速度的 80%~90%。修改 Hysteria2 的端口、混淆或端口跳跃后，在客户端中更新订阅。
 
 ## 菜单使用说明
 
@@ -260,7 +261,7 @@ sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.
 ╭────────────────────────────────────────────────────────
 │
 │   ┌─┐┌─┐┌─┐┬ ┬─┐ ┬┬─┐┌─┐┬ ┬
-│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.7.2
+│   ├┤ ├─┤└─┐└┬┘┌┴┬┘├┬┘├─┤└┬┘   v0.7.3
 │   └─┘┴ ┴└─┘ ┴ ┴ └─┴└─┴ ┴ ┴
 │   简单、安全的 Xray 服务器管理工具
 │   改动前自动校验 · 失败自动回滚 · 一个文件管理全部配置
@@ -333,9 +334,11 @@ sing-box 内核的客户端（如 Hiddify、Karing）目前还不支持 Xray 26.
 ├────────────────────────────────────────────────────────
 │ 混淆       关
 │ 端口跳跃   关
+│ 带宽       未设置（BBR）
 ├────────────────────────────────────────────────────────
 │ 1  打开混淆            2  打开端口跳跃
-│ 3  修改端口            4  关闭 Hysteria2
+│ 3  修改端口            4  设置带宽
+│ 5  关闭 Hysteria2
 │ 0  返回
 ```
 
@@ -445,6 +448,7 @@ ezx protocol disable xhttp-tls
 ezx protocol set hysteria2 port 16390  # 修改 Hysteria2 端口
 ezx protocol set hysteria2 obfs on     # Hysteria2 混淆（off 为关闭）
 ezx protocol set hysteria2 hop on      # 端口跳跃，默认 16384-16402，也可以写范围（off 为关闭）
+ezx protocol set hysteria2 bandwidth 1000 1000  # 服务端上行、下行带宽（Mbps），test 为现场测速，off 为清除
 ezx target probe [域名]                # 无域名安装：探测伪装域名
 ezx target set www.example.com         # 无域名安装：更换伪装域名
 
@@ -540,7 +544,7 @@ ezx uninstall --purge                 # 完全卸载
 
 **速度慢**
 
-运行 `sudo ezx doctor` 确认 BBR 已开启。线路丢包较多时，可以尝试 Hysteria2，并在客户端中填写带宽。
+运行 `sudo ezx doctor` 确认 BBR 已开启。线路丢包较多时，可以尝试 Hysteria2，并在服务端和客户端都设置带宽。
 
 ## 更新
 

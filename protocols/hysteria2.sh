@@ -4,7 +4,8 @@
 #   port  监听端口
 #   obfs  Salamander 混淆：数据包没有 QUIC 特征，可以绕过针对 QUIC 的限速，但也不再像 HTTP/3，且更耗 CPU。默认关闭
 #   hop   端口跳跃：服务端用 nftables 把一段 UDP 端口转发到监听端口，客户端每隔一段时间换一个端口连接
-# 带宽由客户端填写（Brutal 拥塞控制按客户端声明的带宽发送），服务端不需要设置
+#   bandwidth  服务器的上下行带宽（Mbps）。默认不设置，用 BBR。丢包率高的线路可以设置：服务端和客户端都填了才会启用 Brutal，
+#              按两边的较小值固定速率发送；只填一端时 Xray 仍然用 BBR
 
 hysteria2_title() { printf 'Hysteria2'; }
 hysteria2_transport() { printf 'udp'; }
@@ -35,10 +36,16 @@ hysteria2_obfs_on() {
 }
 # 端口跳跃的范围，例如 16384-16402；没有开启时为空
 hysteria2_hop_ports() { proto_get hysteria2 .hopPorts; }
+# 服务端带宽，输出「上行 下行」（Mbps）；没有设置时为空
+hysteria2_bandwidth() { jq -r '.protocols.hysteria2.bandwidth // empty | "\(.up) \(.down)"' "${EZ_STATE}"; }
 
 hysteria2_inbound() {
-    local mask='{}'
-    hysteria2_obfs_on && mask=$(jq -nc --arg pw "$(proto_get hysteria2 .obfsPassword)" '{finalmask: {udp: [{type: "salamander", settings: {password: $pw}}]}}')
+    local mask
+    # 混淆和带宽都放在 finalmask 里，两项都没有时不写这个字段
+    mask=$(jq -c --arg obfs "$(hysteria2_obfs_on && echo 1)" '.protocols.hysteria2 as $h | {}
+        | if $obfs == "1" then .udp = [{type: "salamander", settings: {password: $h.obfsPassword}}] else . end
+        | if $h.bandwidth then .quicParams = {brutalUp: "\($h.bandwidth.up) mbps", brutalDown: "\($h.bandwidth.down) mbps"} else . end
+        | if . == {} then . else {finalmask: .} end' "${EZ_STATE}")
     jq -n --argjson port "$(proto_get hysteria2 .port)" \
         --arg domain "$(state_get .domain)" --arg cert "$(cert_file)" --arg key "$(key_file)" \
         --argjson mask "${mask}" \
@@ -124,4 +131,50 @@ hysteria2_set_hop() {
         ((port >= low && port <= high)) && die "UDP ${port} 已经分配给 $(proto_call "${p}" title)，请换一个范围"
     done < <(enabled_protocols)
     proto_set hysteria2 '{hopPorts: $r}' --arg r "${range}"
+}
+
+hysteria2_valid_mbps() { [[ "${1:-}" =~ ^[1-9][0-9]{0,5}$ ]] && (($1 <= 100000)); }
+
+# 设置服务端带宽：$1=上行 $2=下行（Mbps）；off 清除
+hysteria2_set_bandwidth() {
+    if [[ "$1" == off ]]; then
+        state_update 'del(.protocols.hysteria2.bandwidth)'
+        return 0
+    fi
+    hysteria2_valid_mbps "$1" && hysteria2_valid_mbps "${2:-}" ||
+        die "带宽不正确：${1} ${2:-}（上行 下行，单位 Mbps，1-100000，例如 1000 1000）"
+    proto_set hysteria2 '{bandwidth: {up: ($up|tonumber), down: ($down|tonumber)}}' --arg up "$1" --arg down "$2"
+}
+
+# 同时开 4 个连接测 8 秒，输出总速率（Mbps）：$1=下载地址，或 $1=上传地址 $2=上传的文件
+hysteria2_speed() {
+    local url=$1 file=${2:-} i
+    {
+        for i in 1 2 3 4; do
+            if [[ -n "${file}" ]]; then
+                curl -s -o /dev/null -m 8 -A "${EZ_TARGET_UA}" -X POST -T "${file}" -w '%{speed_upload}\n' "${url}" </dev/null &
+            else
+                curl -s -o /dev/null -m 8 -A "${EZ_TARGET_UA}" -w '%{speed_download}\n' "${url}" </dev/null &
+            fi
+        done
+        wait
+    } | awk '{s += $1} END {printf "%d", s * 8 / 1000000}'
+}
+
+# 到就近的 Speedtest 节点测本机带宽，输出「上行 下行」（Mbps）；失败返回 1
+hysteria2_speedtest() {
+    no_system && return 1
+    local tmp host up=0 down=0
+    tmp=$(mktemp -d)
+    # 稀疏文件，不占磁盘空间
+    truncate -s 200M "${tmp}/up"
+    while read -r host; do
+        down=$(hysteria2_speed "https://${host}/download?size=200000000")
+        up=$(hysteria2_speed "https://${host}/upload" "${tmp}/up")
+        ((up > 0 && down > 0)) && break
+    done < <(curl -fsS -m 10 -A "${EZ_TARGET_UA}" 'https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=3' 2>/dev/null |
+        jq -r '.[]? | select(.https_functional == 1) | .host' 2>/dev/null)
+    rm -rf "${tmp}"
+    ((up > 0 && down > 0)) || return 1
+    printf '%s %s\n' "${up}" "${down}"
 }
