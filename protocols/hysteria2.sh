@@ -6,6 +6,7 @@
 #   hop   端口跳跃：服务端用 nftables 把一段 UDP 端口转发到监听端口，客户端每隔一段时间换一个端口连接
 #   bandwidth  服务器的上下行带宽（Mbps）。默认不设置，用 BBR。丢包率高的线路可以设置：服务端和客户端都填了才会启用 Brutal，
 #              按两边的较小值固定速率发送；只填一端时 Xray 仍然用 BBR
+# 没有通过认证的 HTTP/3 请求（例如主动探测）返回和 Nginx 一样的伪装站，不是所有路径都 404
 
 hysteria2_title() { printf 'Hysteria2'; }
 hysteria2_transport() { printf 'udp'; }
@@ -48,7 +49,7 @@ hysteria2_inbound() {
         | if . == {} then . else {finalmask: .} end' "${EZ_STATE}")
     jq -n --argjson port "$(proto_get hysteria2 .port)" \
         --arg domain "$(state_get .domain)" --arg cert "$(cert_file)" --arg key "$(key_file)" \
-        --argjson mask "${mask}" \
+        --arg site "${EZ_WWW}/site" --argjson mask "${mask}" \
         --argjson users "$(hysteria_users_json)" \
         --argjson sniffing "$(sniffing_json)" '{
         tag: "hysteria2", port: $port, protocol: "hysteria",
@@ -56,7 +57,7 @@ hysteria2_inbound() {
         streamSettings: ({
             network: "hysteria", security: "tls",
             tlsSettings: {serverName: $domain, alpn: ["h3"], certificates: [{certificateFile: $cert, keyFile: $key}]},
-            hysteriaSettings: {version: 2, udpIdleTimeout: 60}
+            hysteriaSettings: {version: 2, udpIdleTimeout: 60, masquerade: {type: "file", dir: $site}}
         } + $mask),
         sniffing: $sniffing
     }'

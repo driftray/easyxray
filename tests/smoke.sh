@@ -51,7 +51,7 @@ check "XHTTP-TLS 分享链接端口不变" bash -c "base64 -d <\$(ls ${R}/etc/ea
 check "端口互不重复" cfg '[.inbounds[].port] | length == (unique | length)'
 check "所有入站开启嗅探 routeOnly" cfg '[.inbounds[].sniffing.routeOnly] | all'
 check "Reality shortId 不是旧脚本的固定值" cfg '[.inbounds[] | .streamSettings.realitySettings.shortIds? // empty | .[]] | all(. != "6ba85179e30d4fc2")'
-check "默认不屏蔽 QUIC" cfg '[.routing.rules[] | select(.network == "udp")] | length == 0'
+check "新安装默认屏蔽 QUIC" cfg '[.routing.rules[] | select(.network == "udp" and .port == "443" and .outboundTag == "block")] | length == 1'
 sub_file=$(ls "${R}"/etc/easyxray/subscribe/* | grep -v yaml | head -1)
 check "订阅链接不含 fp" bash -c "! base64 -d < ${sub_file} | grep -q 'fp='"
 check "订阅有 5 条链接" bash -c "[[ \$(base64 -d < ${sub_file} | wc -l) -eq 5 ]]"
@@ -128,6 +128,7 @@ x protocol set hysteria2 hop on >/dev/null 2>&1
 check "端口跳跃默认范围 16384-16402" jq -e '.protocols.hysteria2.hopPorts == "16384-16402"' "${S}"
 check "端口跳跃链接带 mport，mihomo 配置带 ports" bash -c "links | grep -q 'mport=16384-16402' && mihomo | grep -q 'ports: 16384-16402'"
 check "生成 nftables 转发规则" grep -q "udp dport 16384-16402 redirect to :${hport}" "${R}/etc/easyxray/hop.nft"
+check "转发规则只处理发给本机的包" grep -q "fib daddr type local udp dport" "${R}/etc/easyxray/hop.nft"
 check "范围不正确时拒绝" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 hop on 100-200 && ! bash ${HERE}/easyxray protocol set hysteria2 hop on 20000-30000"
 check "拒绝后范围不变" jq -e '.protocols.hysteria2.hopPorts == "16384-16402"' "${S}"
 x rekey hysteria2 >/dev/null 2>&1
@@ -135,6 +136,7 @@ check "重新生成密钥后保留混淆和端口跳跃设置" jq -e '.protocols
 x protocol set hysteria2 hop off >/dev/null 2>&1
 check "关闭端口跳跃后删除规则和 mport" bash -c "[[ ! -e ${R}/etc/easyxray/hop.nft ]] && ! links | grep -q mport"
 check "Hysteria2 只有自己有可调整的设置" bash -c "! bash ${HERE}/easyxray protocol set xhttp-tls obfs on"
+check "HTTP/3 探测返回伪装站" hy '.streamSettings.hysteriaSettings.masquerade | .type == "file" and (.dir | endswith("/www/site"))'
 check "默认不设置带宽" jq -e '.protocols.hysteria2 | has("bandwidth") | not' "${S}"
 x protocol set hysteria2 bandwidth 300 500 >/dev/null 2>&1
 check "设置带宽后写入 brutalUp 和 brutalDown" hy '.streamSettings.finalmask.quicParams == {brutalUp: "300 mbps", brutalDown: "500 mbps"}'

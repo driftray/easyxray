@@ -382,7 +382,7 @@ delete table inet easyxray_hop
 table inet easyxray_hop {
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
-        udp dport $1 redirect to :$2
+        fib daddr type local udp dport $1 redirect to :$2
     }
 }
 EOF

@@ -21,7 +21,7 @@ EZ_NGINX_CONF=${EZ_ROOT}/etc/nginx/conf.d/easyxray.conf
 EZ_USER=easyxray
 
 # easyxray 自身的版本
-EZ_VERSION=0.7.4
+EZ_VERSION=0.7.5
 # 发布地址：更新时从这个仓库的 GitHub Release 下载
 EZ_REPO=driftray/easyxray
 
@@ -128,7 +128,7 @@ state_init() {
         portRange: $range,
         users: [],
         protocols: {},
-        routing: {blockQUIC: false, blockBT: true, rules: []},
+        routing: {blockQUIC: true, blockBT: true, rules: []},
         outbounds: {},
         system: {}
     }' >"${EZ_STATE}"

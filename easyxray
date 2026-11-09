@@ -353,12 +353,19 @@ cmd_hysteria2_set() {
     esac
 }
 
+# 设置了带宽但没有屏蔽 QUIC 时提醒：网站的 HTTP/3 流量有自己的拥塞控制，Brutal 起不到作用
+hy2_quic_hint() {
+    [[ -n "$(hysteria2_bandwidth)" && "$(state_get '.routing.blockQUIC')" != "true" ]] || return 0
+    warn "Hysteria2：启用 Brutal 时建议打开 QUIC 屏蔽（ezx route quic block，对所有协议生效），代理 HTTP/3 时 Brutal 效果有限"
+}
+
 hy2_apply_bandwidth() {
     hysteria2_valid_mbps "$1" && hysteria2_valid_mbps "$2" ||
         die "带宽不正确：$1 $2（上行 下行，单位 Mbps，1-100000，例如 1000 1000）"
     apply_change hysteria2_set_bandwidth "$1" "$2" || return 1
     ok "Hysteria2 服务端带宽：上行 $1 Mbps，下行 $2 Mbps"
     warn "还需要在客户端填写自己宽带的上行/下行带宽：两端都设置才会启用 Brutal，只设一端仍然是 BBR"
+    hy2_quic_hint
 }
 
 # ---------- 用户与订阅 ----------
@@ -423,6 +430,7 @@ cmd_sub() {
     if protocol_enabled hysteria2; then
         if [[ -n "$(hysteria2_bandwidth)" ]]; then
             warn "Hysteria2：服务端已设置带宽，请在客户端填写自己宽带的上行/下行带宽（不要高于实际速度），两端都设置才会启用 Brutal"
+            hy2_quic_hint
         else
             info "Hysteria2：默认用 BBR，客户端不用填带宽；丢包率高的线路需要服务端和客户端都设置带宽，见 ezx protocol set hysteria2 bandwidth"
         fi
@@ -814,6 +822,7 @@ pick_hy2_bandwidth() {
     ui_row "丢包率低的线路不用设置，默认用 BBR"
     ui_row "丢包率高的线路：服务端和客户端都要填上下行带宽，才会启用 Brutal"
     ui_row "${C_DIM}只填一端不生效；客户端的带宽在客户端里按自己宽带的实际速度填写${C_RESET}"
+    ui_row "${C_DIM}启用 Brutal 时不要关闭 QUIC 屏蔽，代理 HTTP/3 时 Brutal 效果有限${C_RESET}"
     ui_rule
     ui_menu 1 "${first}" 2 "填写官方标称带宽"
     ui_menu 3 "现场测速（消耗一些流量）" "" ""
@@ -1130,7 +1139,7 @@ menu_routing() {
     ui_menu 5 "QUIC 屏蔽：$([[ "${quic}" == on ]] && echo 开 || echo 关)" 6 "BT 屏蔽：$([[ "${bt}" == on ]] && echo 开 || echo 关)"
     ui_menu 0 "返回" "" ""
     [[ "${warp}" == off ]] && ui_row "${C_DIM}开启 WARP 时默认分流 ${EZ_WARP_DEFAULT_RULES//,/、}${C_RESET}"
-    ui_row "${C_DIM}QUIC 屏蔽一般不需要开启，只在 QUIC 请求没有按规则分流时使用${C_RESET}"
+    ui_row "${C_DIM}QUIC 屏蔽默认开启：网站的 HTTP/3 改走 TCP，分流更准确，Hysteria2 的 Brutal 也更有效${C_RESET}"
     ui_bottom
     choice=$(ui_ask "请选择：")
     case "${choice}" in
