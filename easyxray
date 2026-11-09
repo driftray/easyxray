@@ -790,9 +790,21 @@ menu_install() {
     esac
 }
 
-# 询问 Hysteria2 服务端带宽，结果放在 EZ_PICKED_BW：「上行,下行」、test、off（$1=manage 时可以清除）或空（不改）
+# 询问带宽数字并输出：$1=提示 $2=默认值（测速结果）。输入不正确时重新询问；没有默认值时直接回车返回 1
+ask_mbps() {
+    local v
+    while :; do
+        v=$(ui_ask "$1（Mbps，直接回车$([[ -n "${2:-}" ]] && printf '用 %s' "$2" || printf '跳过')）：")
+        v=${v:-${2:-}}
+        [[ -n "${v}" ]] || return 1
+        hysteria2_valid_mbps "${v}" && { printf '%s' "${v}"; return 0; }
+        warn "请输入 1-100000 的整数"
+    done
+}
+
+# 询问 Hysteria2 服务端带宽，结果放在 EZ_PICKED_BW：「上行,下行」、off（$1=manage 时可以清除）或空（不改）
 pick_hy2_bandwidth() {
-    local first=跳过 up down
+    local first=跳过 up down result=''
     [[ "${1:-}" == manage ]] && first="清除带宽设置"
     EZ_PICKED_BW=''
     printf '\n'
@@ -807,15 +819,25 @@ pick_hy2_bandwidth() {
     ui_menu 3 "现场测速（消耗一些流量）" "" ""
     ui_bottom
     case "$(ui_ask "请选择（直接回车跳过）：")" in
-    1) [[ "${1:-}" == manage ]] && EZ_PICKED_BW=off ;;
-    2)
-        up=$(ui_ask "服务器上行带宽（Mbps）：")
-        down=$(ui_ask "服务器下行带宽（Mbps）：")
-        EZ_PICKED_BW="${up},${down}"
+    1)
+        [[ "${1:-}" == manage ]] && EZ_PICKED_BW=off
+        return 0
         ;;
-    3) EZ_PICKED_BW=test ;;
+    2) ;;
+    3)
+        info "到就近的 Speedtest 节点测速，大约需要 20 秒..."
+        if result=$(hysteria2_speedtest); then
+            info "测速结果：上行 ${result% *} Mbps，下行 ${result#* } Mbps"
+        else
+            warn "测速失败，请手动填写"
+            result=''
+        fi
+        ;;
+    *) return 0 ;;
     esac
-    return 0
+    up=$(ask_mbps "服务器上行带宽" "${result% *}") || return 0
+    down=$(ask_mbps "服务器下行带宽" "${result#* }") || return 0
+    EZ_PICKED_BW="${up},${down}"
 }
 
 # 探测候选伪装域名并让用户选择，结果放在 EZ_PICKED_TARGET；回车选推荐，也可以直接输入其他域名
@@ -1003,7 +1025,7 @@ menu_hysteria2() {
         pick_hy2_bandwidth manage
         case "${EZ_PICKED_BW}" in
         '') return 0 ;;
-        off | test) (cmd_hysteria2_set bandwidth "${EZ_PICKED_BW}") ;;
+        off) (cmd_hysteria2_set bandwidth off) ;;
         *) (cmd_hysteria2_set bandwidth "${EZ_PICKED_BW%,*}" "${EZ_PICKED_BW#*,}") ;;
         esac
         ;;
