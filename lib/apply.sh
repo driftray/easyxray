@@ -135,11 +135,16 @@ apply_change() {
     local backup
     backup=$(mktemp "${EZ_STATE}.bak.XXXXXX")
     cp -p "${EZ_STATE}" "${backup}"
-    if ("$@") && EZ_PREV_STATE=${backup} ez_apply; then
+    # 通过本机代理连 SSH 时，Xray 重启可能断开连接：断线或按 Ctrl-C 都不中断，做完校验和回滚
+    trap '' HUP INT
+    # 放在子进程里：其中 die 只结束子进程，备份文件和状态都能在下面处理
+    if ("$@") && (EZ_PREV_STATE=${backup} ez_apply); then
         rm -f "${backup}"
+        trap - HUP INT
         return 0
     fi
     mv -f "${backup}" "${EZ_STATE}"
+    trap - HUP INT
     err "修改没有生效，已保持原来的设置"
     return 1
 }

@@ -148,6 +148,14 @@ x protocol set hysteria2 obfs off >/dev/null 2>&1
 check "带宽不正确时拒绝" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 bandwidth 0 500 && ! bash ${HERE}/easyxray protocol set hysteria2 bandwidth abc 500 && ! bash ${HERE}/easyxray protocol set hysteria2 bandwidth 300"
 check "测速失败时不改变带宽" bash -c "! bash ${HERE}/easyxray protocol set hysteria2 bandwidth test && jq -e '.protocols.hysteria2.bandwidth == {up: 300, down: 500}' ${S}"
 x protocol set hysteria2 bandwidth off >/dev/null 2>&1
+cat >"${R}/apply-test.sh" <<EOF
+source "${HERE}/lib/common.sh"
+for f in "${HERE}"/lib/*.sh "${HERE}"/protocols/*.sh; do source "\${f}"; done
+EOF
+cp "${S}" "${R}/state.before"
+check "应用时出错：状态恢复且不留备份文件" bash -c "source ${R}/apply-test.sh; xray_config_json() { return 1; }; apply_change state_update '.applyTest = 1' 2>/dev/null; cmp -s ${S} ${R}/state.before && ! ls ${S}.bak.* 2>/dev/null"
+check "应用时 SSH 断开不中断" bash -c "source ${R}/apply-test.sh; ez_apply() { kill -HUP \$\$; return 0; }; apply_change state_update '.applyTest = 1' && jq -e '.applyTest == 1' ${S} >/dev/null && ! ls ${S}.bak.* 2>/dev/null"
+cp "${R}/state.before" "${S}"
 check "清除带宽后状态里没有带宽" jq -e '.protocols.hysteria2 | has("bandwidth") | not' "${S}"
 check "清除带宽后没有 finalmask" hy '.streamSettings | has("finalmask") | not'
 x protocol set hysteria2 port 16400 >/dev/null 2>&1
